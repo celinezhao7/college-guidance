@@ -6,7 +6,10 @@ MESSAGES = {
     "language_title": {"en": "Choose language / 选择语言", "zh": "选择语言 / Choose language"},
     "language_en": {"en": "1. English", "zh": "1. English（英文）"},
     "language_zh": {"en": "2. Chinese (Simplified)", "zh": "2. 简体中文"},
-    "language_prompt": {"en": "Enter choice (1 or 2) [1]: ", "zh": "请输入选项（1 或 2）[1]："},
+    "language_prompt": {
+        "en": "Enter choice (1 or 2) / 请输入选项（1 或 2）: ",
+        "zh": "请输入选项（1 或 2）/ Enter choice (1 or 2): ",
+    },
     "app_title": {"en": "COLLEGE GUIDANCE ASSISTANT", "zh": "大学申请指导助手"},
     "choose_system": {"en": "Choose application system:", "zh": "请选择申请系统："},
     "menu_uc": {"en": "1. UC PIQ Recommendation", "zh": "1. UC 个人洞察问题（PIQ）推荐"},
@@ -33,8 +36,11 @@ def choose_language() -> str:
     print("=" * 60)
     print(MESSAGES["language_en"]["zh"])
     print(MESSAGES["language_zh"]["zh"])
-    choice = input(MESSAGES["language_prompt"]["zh"]).strip() or "1"
-    return LANGUAGES.get(choice.lower(), "en")
+    while True:
+        choice = input(MESSAGES["language_prompt"]["zh"]).strip().lower()
+        if choice in LANGUAGES:
+            return LANGUAGES[choice]
+        print("请输入 1 或 2。/ Please enter 1 or 2.")
 
 
 def tr(language: str, key: str, **values) -> str:
