@@ -43,6 +43,8 @@ The program supports:
 - location, cost, size, and institutional-selectivity preferences
 - verified College Scorecard facts such as overall admission rate, student size,
   cost, completion rate, and reported fields of study
+- an English or Simplified Chinese interface and recommendation output, selected
+  when the application starts
 
 ## Important limitations
 
@@ -176,6 +178,14 @@ Rebuild the indexes whenever source documents change.
 ```powershell
 python src\recommend.py
 ```
+
+Choose `1` for English or `2` for Simplified Chinese at startup. The selected
+language applies to the command-line interface and AI-generated recommendations.
+Official school names, source evidence labels, PIQ/prompt numbers, and CIP codes
+remain unchanged so that citations can still be checked against their sources.
+In the Chinese interface, enter college and major names in English (for example,
+`University of Michigan` and `Computer Science`) for the most reliable matching
+against the English-language College Scorecard catalog.
 
 Main menu:
 

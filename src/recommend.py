@@ -1,4 +1,5 @@
 import os
+import os
 import time
 from pathlib import Path
 
@@ -7,6 +8,7 @@ from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 
 from college_major import run_college_major_matching
+from i18n import choose_language, output_language_instruction, tr
 
 
 load_dotenv()
@@ -650,18 +652,18 @@ def deduplicate_documents(documents):
 # Choose recommendation mode
 # ============================================================
 
-def choose_mode():
+def choose_mode(language="en"):
 
     print("\n" + "=" * 60)
-    print("COLLEGE GUIDANCE ASSISTANT")
+    print(tr(language, "app_title"))
     print("=" * 60)
 
-    print("\nChoose application system:\n")
-    print("1. UC PIQ Recommendation")
-    print("2. Common App Essay Prompt Recommendation")
-    print("3. College & Major Matching")
+    print(f"\n{tr(language, 'choose_system')}\n")
+    print(tr(language, "menu_uc"))
+    print(tr(language, "menu_common"))
+    print(tr(language, "menu_college"))
 
-    choice = input("\nEnter choice (1, 2, or 3): ").strip()
+    choice = input("\n" + tr(language, "choice_123")).strip()
 
     if choice == "1":
         return "uc"
@@ -685,10 +687,11 @@ def main():
     # Choose mode
     # --------------------------------------------------------
 
-    application_type = choose_mode()
+    language = choose_language()
+    application_type = choose_mode(language)
 
     if application_type is None:
-        print("\nInvalid choice. Please enter 1, 2, or 3.")
+        print("\n" + tr(language, "invalid_123"))
         return
 
     total_start = time.time()
@@ -715,9 +718,9 @@ def main():
             if doc.page_content.strip()
         ]
         try:
-            run_college_major_matching(llm, student_context, evidence_labels)
+            run_college_major_matching(llm, student_context, evidence_labels, language)
         except RuntimeError as exc:
-            print(f"\nUnable to create recommendations: {exc}")
+            print("\n" + tr(language, "unable", error=exc))
         return
 
     # --------------------------------------------------------
@@ -729,20 +732,20 @@ def main():
         guidance_retriever = uc_retriever
         guidance_query = UC_QUERY
 
-        system_prompt = UC_SYSTEM_PROMPT
+        system_prompt = UC_SYSTEM_PROMPT + output_language_instruction(language)
 
         guidance_name = "UC"
-        output_title = "UC PIQ RECOMMENDATION"
+        output_title = "UC PIQ RECOMMENDATION" if language == "en" else "UC PIQ 推荐"
 
     else:
 
         guidance_retriever = common_app_retriever
         guidance_query = COMMON_APP_QUERY
 
-        system_prompt = COMMON_APP_SYSTEM_PROMPT
+        system_prompt = COMMON_APP_SYSTEM_PROMPT + output_language_instruction(language)
 
         guidance_name = "Common App"
-        output_title = "COMMON APP ESSAY PROMPT RECOMMENDATION"
+        output_title = ("COMMON APP ESSAY PROMPT RECOMMENDATION" if language == "en" else "COMMON APP 主文书题目推荐")
 
     # --------------------------------------------------------
     # Retrieval
@@ -760,26 +763,17 @@ def main():
 
     retrieval_end = time.time()
 
-    print(
-        f"\nRetrieved {len(guidance_docs)} "
-        f"{guidance_name} chunks"
-    )
+    print("\n" + tr(language, "retrieved_guidance", count=len(guidance_docs), name=guidance_name))
 
-    print(
-        f"Retrieved {len(student_docs)} "
-        f"student chunks"
-    )
+    print(tr(language, "retrieved_student", count=len(student_docs)))
 
-    print(
-        f"Retrieval time: "
-        f"{retrieval_end - retrieval_start:.2f}s"
-    )
+    print(tr(language, "retrieval_time", seconds=retrieval_end - retrieval_start))
 
     # --------------------------------------------------------
     # Show retrieved student evidence
     # --------------------------------------------------------
 
-    print("\nStudent evidence retrieved:\n")
+    print("\n" + tr(language, "student_evidence") + "\n")
 
     for doc in student_docs:
 
@@ -880,29 +874,17 @@ for this student and identify the Best Overall Choice.
 
     if first_token_time is not None:
 
-        print(
-            f"Time to first token: "
-            f"{first_token_time - generation_start:.2f}s"
-        )
+        print(tr(language, "ttft", seconds=first_token_time - generation_start))
 
-        print(
-            f"Time to first visible output: "
-            f"{first_token_time - total_start:.2f}s"
-        )
+        print(tr(language, "ttfo", seconds=first_token_time - total_start))
 
     else:
 
-        print("Time to first token: N/A")
+        print(tr(language, "ttft_na"))
 
-    print(
-        f"Generation time: "
-        f"{generation_end - generation_start:.2f}s"
-    )
+    print(tr(language, "generation_time", seconds=generation_end - generation_start))
 
-    print(
-        f"Total time: "
-        f"{total_end - total_start:.2f}s"
-    )
+    print(tr(language, "total_time", seconds=total_end - total_start))
 
 
 if __name__ == "__main__":

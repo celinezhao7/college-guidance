@@ -8,6 +8,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
+from i18n import output_language_instruction
+
 
 SCORECARD_URL = "https://api.data.gov/ed/collegescorecard/v1/schools.json"
 CATALOG_PATH = Path(__file__).resolve().parent.parent / "data" / "scorecard_school_catalog.json"
@@ -22,6 +24,15 @@ PROGRAM_FIELDS = {
     "art": "latest.academics.program_percentage.visual_performing",
     "design": "latest.academics.program_percentage.visual_performing",
     "social science": "latest.academics.program_percentage.social_science",
+    "计算机": "latest.academics.program_percentage.computer",
+    "数据科学": "latest.academics.program_percentage.computer",
+    "工程": "latest.academics.program_percentage.engineering",
+    "商科": "latest.academics.program_percentage.business_marketing",
+    "心理": "latest.academics.program_percentage.psychology",
+    "生物": "latest.academics.program_percentage.biological",
+    "艺术": "latest.academics.program_percentage.visual_performing",
+    "设计": "latest.academics.program_percentage.visual_performing",
+    "社会科学": "latest.academics.program_percentage.social_science",
 }
 
 UC_SYSTEM_ALIASES = {"uc", "uc schools", "university of california"}
@@ -91,16 +102,23 @@ def stream_response(llm, system_prompt: str, user_prompt: str) -> None:
     print()
 
 
-def choose_matching_path() -> str | None:
-    print("\nChoose your starting point:\n")
-    print("1. I have target colleges - help me choose majors")
-    print("2. I have a target major - help me choose colleges")
-    print("3. I am unsure about both - recommend major directions")
-    choice = input("\nEnter choice (1, 2, or 3): ").strip()
+def choose_matching_path(language="en") -> str | None:
+    if language == "zh":
+        print("\n请选择起点：\n")
+        print("1. 我有目标大学——帮我选择专业")
+        print("2. 我有目标专业——帮我选择大学")
+        print("3. 大学和专业都不确定——推荐专业方向")
+        choice = input("\n请输入选项（1、2 或 3）：").strip()
+    else:
+        print("\nChoose your starting point:\n")
+        print("1. I have target colleges - help me choose majors")
+        print("2. I have a target major - help me choose colleges")
+        print("3. I am unsure about both - recommend major directions")
+        choice = input("\nEnter choice (1, 2, or 3): ").strip()
     return {"1": "college_first", "2": "major_first", "3": "explore"}.get(choice)
 
 
-def recommend_majors(llm, student_context: str, evidence_labels: list[str]) -> None:
+def recommend_majors(llm, student_context: str, evidence_labels: list[str], language="en") -> None:
     prompt = f"""=== DOCUMENTED STUDENT EVIDENCE ===
 {student_context}
 
@@ -113,7 +131,7 @@ interdisciplinary alternatives where the evidence supports them."""
     for label in evidence_labels:
         print(f"- {label}")
     print()
-    stream_response(llm, MAJOR_SYSTEM_PROMPT, prompt)
+    stream_response(llm, MAJOR_SYSTEM_PROMPT + output_language_instruction(language), prompt)
 
 
 def fetch_bachelors_fields_for_schools(school_ids: list[int]) -> dict[int, list[dict]]:
@@ -154,8 +172,11 @@ def fetch_bachelors_fields(school_id: int) -> list[dict]:
     return fetch_bachelors_fields_for_schools([school_id]).get(school_id, [])
 
 
-def recommend_majors_at_colleges(llm, student_context: str) -> None:
-    raw_targets = ask("Target colleges, comma-separated")
+def recommend_majors_at_colleges(llm, student_context: str, language="en") -> None:
+    raw_targets = ask(
+        "目标大学（请使用英文官方名称或常用英文缩写，用逗号分隔）"
+        if language == "zh" else "Target colleges, comma-separated"
+    )
     if not raw_targets:
         print("\nNo target colleges entered.")
         return
@@ -195,7 +216,7 @@ Recommend school-specific fields of study supported by both evidence sets."""
     print("\n" + "=" * 60)
     print("MAJORS AT TARGET COLLEGES")
     print("=" * 60 + "\n")
-    stream_response(llm, SCHOOL_MAJOR_SYSTEM_PROMPT, prompt)
+    stream_response(llm, SCHOOL_MAJOR_SYSTEM_PROMPT + output_language_instruction(language), prompt)
 
 
 def _number(value: str):
@@ -205,28 +226,42 @@ def _number(value: str):
         return None
 
 
-def collect_college_preferences() -> dict:
-    print("\nEnter what you know. Press Enter to skip an optional question.")
+def collect_college_preferences(language="en") -> dict:
+    zh = language == "zh"
+    print("\n请输入你已知的信息；可选问题可按 Enter 跳过。" if zh else "\nEnter what you know. Press Enter to skip an optional question.")
     preferences = {
-        "sat": _number(ask("SAT score, optional")),
-        "act": _number(ask("ACT score, optional")),
+        "sat": _number(ask("SAT 分数（可选）" if zh else "SAT score, optional")),
+        "act": _number(ask("ACT 分数（可选）" if zh else "ACT score, optional")),
         "states": ask(
-            "Preferred state abbreviations, comma-separated (for example: CA, MI)",
+            "偏好的州缩写，用逗号分隔（例如：CA, MI）" if zh else "Preferred state abbreviations, comma-separated (for example: CA, MI)",
             "CA",
         ),
-        "max_cost": _number(ask("Maximum annual cost before aid, optional")),
-        "size": ask("Preferred size: small, medium, large, or any", "any").lower(),
+        "max_cost": _number(ask("助学金前的最高年度费用（可选）" if zh else "Maximum annual cost before aid, optional")),
+        "size": ask("学校规模：小型、中型、大型或不限" if zh else "Preferred size: small, medium, large, or any", "不限" if zh else "any").lower(),
         "competition": ask(
-            "Preferred overall competition: low, medium, high, or balanced",
-            "balanced",
+            "整体竞争程度：低、中、高、均衡或不限" if zh else "Preferred overall competition: low, medium, high, or balanced",
+            "均衡" if zh else "balanced",
         ).lower(),
-        "major": ask("Intended major or academic area", "Computer Science"),
+        "major": ask(
+            "意向专业或学术领域（请使用英文名称，例如 Computer Science）"
+            if zh else "Intended major or academic area",
+            "Computer Science",
+        ),
         "targets": ask(
-            "Target schools/systems, comma-separated (for example: UC, UMich)",
+            "目标大学或大学系统（请使用英文官方名称或常用英文缩写，例如 UC、UMich；用逗号分隔）"
+            if zh else "Target schools/systems, comma-separated (for example: UC, UMich)",
             "No specific target",
         ),
-        "other": ask("Other priorities, optional", "No additional preferences"),
+        "other": ask("其他偏好（可选）" if zh else "Other priorities, optional", "无其他偏好" if zh else "No additional preferences"),
     }
+    preferences["size"] = {
+        "小": "small", "小型": "small", "中": "medium", "中型": "medium",
+        "大": "large", "大型": "large", "不限": "any",
+    }.get(preferences["size"], preferences["size"])
+    preferences["competition"] = {
+        "低": "low", "中": "medium", "高": "high", "均衡": "balanced",
+        "不限": "balanced",
+    }.get(preferences["competition"], preferences["competition"])
     resolved_targets, discovered_states = resolve_target_names(
         preferences["targets"], preferences["states"]
     )
@@ -535,8 +570,8 @@ def rank_colleges(colleges: Iterable[dict], preferences: dict) -> list[dict]:
     return (targets + alternatives)[:30]
 
 
-def recommend_colleges(llm, student_context: str) -> None:
-    preferences = collect_college_preferences()
+def recommend_colleges(llm, student_context: str, language="en") -> None:
+    preferences = collect_college_preferences(language)
     colleges = fetch_colleges(preferences)
     candidates = rank_colleges(colleges, preferences)
     if not candidates:
@@ -585,18 +620,18 @@ selectivity."""
             for name in missing:
                 print(f"- {name}")
     print()
-    stream_response(llm, COLLEGE_SYSTEM_PROMPT, prompt)
+    stream_response(llm, COLLEGE_SYSTEM_PROMPT + output_language_instruction(language), prompt)
 
 
 def run_college_major_matching(
-    llm, student_context: str, evidence_labels: list[str]
+    llm, student_context: str, evidence_labels: list[str], language="en"
 ) -> None:
-    path = choose_matching_path()
+    path = choose_matching_path(language)
     if path == "college_first":
-        recommend_majors_at_colleges(llm, student_context)
+        recommend_majors_at_colleges(llm, student_context, language)
     elif path == "major_first":
-        recommend_colleges(llm, student_context)
+        recommend_colleges(llm, student_context, language)
     elif path == "explore":
-        recommend_majors(llm, student_context, evidence_labels)
+        recommend_majors(llm, student_context, evidence_labels, language)
     else:
-        print("\nInvalid choice. Please enter 1, 2, or 3.")
+        print("\n选项无效，请输入 1、2 或 3。" if language == "zh" else "\nInvalid choice. Please enter 1, 2, or 3.")
