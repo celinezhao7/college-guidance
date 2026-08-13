@@ -1,5 +1,9 @@
 # College Guidance
 
+[English](#english) | [简体中文](#简体中文)
+
+## English
+
 An evidence-based college application guidance assistant built with LangChain,
 Chroma, Qwen, and the U.S. Department of Education College Scorecard API.
 
@@ -70,6 +74,7 @@ college-guidance/
 ├── src/
 │   ├── build_index.py         # Builds the Chroma vector indexes
 │   ├── college_major.py       # College Scorecard and major-matching logic
+│   ├── i18n.py                # CLI localization strings and helpers
 │   └── recommend.py           # Main command-line application
 ├── .env.example
 ├── .gitignore
@@ -235,3 +240,217 @@ cache are excluded from Git.
 
 This is a command-line prototype. Recommendations should be treated as structured
 research support, not as professional admissions advice or an admission forecast.
+
+---
+
+## 简体中文
+
+这是一个基于证据的大学申请指导助手，使用 LangChain、Chroma、Qwen 和美国教育部 College Scorecard API 构建。
+
+本项目使用检索增强生成（RAG），根据有记录的学生经历和官方指导生成有依据的建议，支持文书题目选择、大学探索和专业探索。
+
+### 功能
+
+#### 1. UC PIQ 推荐
+
+根据以下内容推荐四道 UC Personal Insight Questions（个人洞察问题）：
+
+- `data/uc_official/` 中的 UC 官方指导；
+- `data/student/` 中有记录的学生经历；
+- 证据强度、题目契合度、个人洞察和整体内容多样性。
+
+#### 2. Common App 主文书题目推荐
+
+根据 Common App 官方指导和检索到的学生经历，推荐三道 Common App 主文书题目，并选出最适合的总体选择。
+
+#### 3. 大学与专业匹配
+
+提供三种起点：
+
+1. 已有目标大学 → 推荐这些大学中相关的学习领域；
+2. 已有目标专业 → 推荐报告了相关本科专业领域的大学；
+3. 两者都不确定 → 根据学生经历推荐专业方向。
+
+大学信息来自 College Scorecard API。学校特定的专业领域使用四位 Classification of Instructional Programs（CIP）记录，本科学位层级为 `3`。
+
+程序支持：
+
+- 多个偏好州，例如 `CA, MI, MA`；
+- 学校名称和英文缩写匹配；
+- 根据官方学校目录进行模糊匹配；
+- 名称有歧义时要求用户确认；
+- 地理位置、费用、学校规模和院校选择性偏好；
+- College Scorecard 中经过验证的整体录取率、学生人数、费用、毕业率和专业领域等信息；
+- 启动时选择英文或简体中文界面，并使用所选语言生成推荐结果。
+
+### 重要限制
+
+本工具不预测录取结果。
+
+- 学校整体录取率不等于个人录取概率。
+- 将某所学校设为目标学校，不表示该校一定与学生的学术背景匹配。
+- College Scorecard CIP 字段是联邦统计分类，可能与学校当前目录中的具体专业或方向名称不同。
+- 就读成本和平均净价不是某位学生的个人实际费用。
+- 专业是否开设、申请要求、截止日期和当前费用必须前往大学官方网站核实。
+- 本项目不使用外部大学排名。
+
+### 项目结构
+
+```text
+college-guidance/
+├── data/
+│   ├── common_app_official/   # Common App 官方指导文档
+│   ├── student/               # 学生经历文档
+│   └── uc_official/           # UC 官方指导文档
+├── src/
+│   ├── build_index.py         # 构建 Chroma 向量索引
+│   ├── college_major.py       # College Scorecard 与专业匹配逻辑
+│   ├── i18n.py                # 命令行界面本地化文本
+│   └── recommend.py           # 主命令行程序
+├── .env.example
+├── .gitignore
+├── requirements.txt
+└── README.md
+```
+
+生成的 Chroma 索引和本地 College Scorecard 学校目录缓存不会提交到 Git。
+
+### 环境要求
+
+- Python 3.10 或更高版本；
+- 用于嵌入和聊天生成的 DashScope 兼容 API 密钥；
+- 用于 College Scorecard 查询的免费 `api.data.gov` 密钥。
+
+### 安装
+
+在仓库目录中打开 PowerShell：
+
+```powershell
+Set-Location C:\Users\celin\college-guidance
+```
+
+创建并激活虚拟环境：
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+如果 PowerShell 阻止激活，可仅对当前进程临时放行：
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
+```
+
+安装依赖：
+
+```powershell
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+### 配置
+
+复制环境变量示例文件：
+
+```powershell
+Copy-Item .env.example .env
+```
+
+在 `.env` 中填写密钥：
+
+```env
+DASHSCOPE_API_KEY=your_dashscope_api_key
+DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+QWEN_MODEL=qwen3.5-plus
+COLLEGE_SCORECARD_API_KEY=your_data_gov_api_key
+```
+
+可在 [api.data.gov](https://api.data.gov/signup/) 申请 College Scorecard API 密钥。
+
+请勿提交 `.env`。该文件已被 `.gitignore` 排除。
+
+### 准备学生经历
+
+将 `.docx` 源文件放入相应的数据目录。文档使用以下分隔符切分：
+
+```text
+@@@
+```
+
+学生经历应使用稳定的标签，例如：
+
+```text
+Experience 2: Computer Science Journey
+```
+
+模型会按照指令引用这些原始标签，并且只能使用文档中记录的事实。
+
+### 构建索引
+
+运行：
+
+```powershell
+python src\build_index.py
+```
+
+该命令会在 `chroma/` 下创建以下本地 Chroma 集合：
+
+- UC 官方指导；
+- Common App 官方指导；
+- 学生经历。
+
+索引重建具有幂等性：每个集合会被重置，并使用稳定的文档 ID 重新构建。重复执行不会累积重复经历。源文档发生变化后应重新构建索引。
+
+### 运行程序
+
+```powershell
+python src\recommend.py
+```
+
+启动时选择 `1` 使用英文，或选择 `2` 使用简体中文。所选语言会应用到命令行界面和 AI 生成的推荐结果。
+
+为确保能够准确匹配英文 College Scorecard 目录，中文界面中的大学和专业名称仍建议使用英文输入，例如 `University of Michigan` 和 `Computer Science`。学校官方名称、证据标签、PIQ/题目编号和 CIP 编码会保留原文，以便核查来源。
+
+主菜单：
+
+```text
+1. UC 个人洞察问题（PIQ）推荐
+2. Common App 主文书题目推荐
+3. 大学与专业匹配
+```
+
+大学与专业匹配菜单：
+
+```text
+1. 我有目标大学——帮我选择专业
+2. 我有目标专业——帮我选择大学
+3. 大学和专业都不确定——推荐专业方向
+```
+
+第一次搜索学校名称时，程序可能会下载 College Scorecard 官方学校目录缓存。缓存只包含公开的学校 ID、名称、城市和州，不包含用户回答。
+
+### 数据与隐私
+
+本地存储的数据包括：
+
+- `data/` 下的 Word 源文档；
+- `chroma/` 下生成的向量索引；
+- `.env` 中的 API 凭证；
+- 可选生成的 College Scorecard 学校目录缓存。
+
+用户在交互过程中输入的地点、预算、学校规模、意向专业和目标学校等信息，只在当前运行期间保存在内存中，不会写入用户档案文件。生成推荐时，这些信息会包含在发送给所配置 Qwen API 的提示中。
+
+`.env`、虚拟环境、Chroma 索引和生成的学校目录缓存均被排除在 Git 之外。
+
+### 数据来源
+
+- 美国教育部 [College Scorecard](https://collegescorecard.ed.gov/data/)；
+- `data/uc_official/` 中的 UC 官方指导文档；
+- `data/common_app_official/` 中的 Common App 官方指导文档；
+- `data/student/` 中由用户提供的学生经历。
+
+### 开发状态
+
+本项目目前是命令行原型。推荐结果应被视为结构化的研究辅助信息，而不是专业升学建议或录取预测。
