@@ -1,5 +1,6 @@
 # Virtual environments
 .venv/
+.venv-old/
 venv/
 env/
 
@@ -25,6 +26,7 @@ dist/
 
 # Generated local vector database
 chroma/
+data/scorecard_school_catalog.json
 
 # Editors and operating systems
 .vscode/

@@ -6,6 +6,8 @@ from dotenv import load_dotenv
 from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 
+from college_major import run_college_major_matching
+
 
 load_dotenv()
 
@@ -78,6 +80,15 @@ common_app_retriever = common_app_vectorstore.as_retriever(
 student_retriever = student_vectorstore.as_retriever(
     search_kwargs={
         "k": 8,
+        "filter": {
+            "chunk_role": "experience"
+        }
+    }
+)
+
+all_student_experience_retriever = student_vectorstore.as_retriever(
+    search_kwargs={
+        "k": 20,
         "filter": {
             "chunk_role": "experience"
         }
@@ -618,6 +629,23 @@ Source: {source}
     return "\n\n".join(sections)
 
 
+def deduplicate_documents(documents):
+    unique_documents = []
+    seen = set()
+    for document in documents:
+        key = (
+            document.metadata.get("type"),
+            document.metadata.get("source"),
+            document.metadata.get("chunk_index"),
+            document.metadata.get("chunk_role"),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_documents.append(document)
+    return unique_documents
+
+
 # ============================================================
 # Choose recommendation mode
 # ============================================================
@@ -625,20 +653,24 @@ Source: {source}
 def choose_mode():
 
     print("\n" + "=" * 60)
-    print("ESSAY PROMPT RECOMMENDATION ASSISTANT")
+    print("COLLEGE GUIDANCE ASSISTANT")
     print("=" * 60)
 
     print("\nChoose application system:\n")
     print("1. UC PIQ Recommendation")
     print("2. Common App Essay Prompt Recommendation")
+    print("3. College & Major Matching")
 
-    choice = input("\nEnter choice (1 or 2): ").strip()
+    choice = input("\nEnter choice (1, 2, or 3): ").strip()
 
     if choice == "1":
         return "uc"
 
     if choice == "2":
         return "common_app"
+
+    if choice == "3":
+        return "college_major"
 
     return None
 
@@ -656,13 +688,40 @@ def main():
     application_type = choose_mode()
 
     if application_type is None:
-        print("\nInvalid choice. Please enter 1 or 2.")
+        print("\nInvalid choice. Please enter 1, 2, or 3.")
         return
 
     total_start = time.time()
 
     # --------------------------------------------------------
-    # Select correct official knowledge base
+    # Load the model once for all recommendation modes
+    # --------------------------------------------------------
+
+    llm = ChatOpenAI(
+        model=os.getenv("QWEN_MODEL", "qwen3.5-plus"),
+        api_key=os.getenv("DASHSCOPE_API_KEY"),
+        base_url=os.getenv("DASHSCOPE_BASE_URL"),
+        temperature=0.2,
+    )
+
+    if application_type == "college_major":
+        student_docs = deduplicate_documents(
+            all_student_experience_retriever.invoke(STUDENT_QUERY)
+        )
+        student_context = format_documents(student_docs)
+        evidence_labels = [
+            doc.page_content.splitlines()[0].strip()
+            for doc in student_docs
+            if doc.page_content.strip()
+        ]
+        try:
+            run_college_major_matching(llm, student_context, evidence_labels)
+        except RuntimeError as exc:
+            print(f"\nUnable to create recommendations: {exc}")
+        return
+
+    # --------------------------------------------------------
+    # Select correct official essay guidance knowledge base
     # --------------------------------------------------------
 
     if application_type == "uc":
@@ -695,8 +754,8 @@ def main():
         guidance_query
     )
 
-    student_docs = student_retriever.invoke(
-        STUDENT_QUERY
+    student_docs = deduplicate_documents(
+        student_retriever.invoke(STUDENT_QUERY)
     )
 
     retrieval_end = time.time()
@@ -779,24 +838,6 @@ Recommend the 4 best-supported UC PIQs for this student.
 Recommend the 3 best-supported Common App essay prompts
 for this student and identify the Best Overall Choice.
 """
-
-    # --------------------------------------------------------
-    # Qwen model
-    # --------------------------------------------------------
-
-    llm = ChatOpenAI(
-        model=os.getenv(
-            "QWEN_MODEL",
-            "qwen3.5-plus"
-        ),
-        api_key=os.getenv(
-            "DASHSCOPE_API_KEY"
-        ),
-        base_url=os.getenv(
-            "DASHSCOPE_BASE_URL"
-        ),
-        temperature=0.2,
-    )
 
     # --------------------------------------------------------
     # Streaming generation

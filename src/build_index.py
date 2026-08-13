@@ -1,4 +1,5 @@
 import os
+import hashlib
 from pathlib import Path
 
 from docx import Document as DocxDocument
@@ -69,6 +70,37 @@ def classify_student_chunk(chunk: str) -> str:
         return "retrieval_instruction"
 
     return "experience"
+
+
+def stable_document_id(document: Document) -> str:
+    identity = "|".join(
+        [
+            str(document.metadata.get("type", "")),
+            str(document.metadata.get("source", "")),
+            str(document.metadata.get("chunk_index", "")),
+            str(document.metadata.get("chunk_role", "")),
+        ]
+    )
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+
+def rebuild_collection(
+    documents: list[Document],
+    embeddings: OpenAIEmbeddings,
+    collection_name: str,
+    persist_directory: Path,
+) -> None:
+    vectorstore = Chroma(
+        collection_name=collection_name,
+        persist_directory=str(persist_directory),
+        embedding_function=embeddings,
+    )
+    vectorstore.reset_collection()
+    if documents:
+        vectorstore.add_documents(
+            documents=documents,
+            ids=[stable_document_id(document) for document in documents],
+        )
 
 
 # -------------------------
@@ -191,9 +223,9 @@ def main():
     # Build UC vector database
     # -------------------------
 
-    Chroma.from_documents(
+    rebuild_collection(
         documents=uc_chunks,
-        embedding=embeddings,
+        embeddings=embeddings,
         collection_name="uc_official",
         persist_directory=str(UC_DB_DIR),
     )
@@ -202,9 +234,9 @@ def main():
     # Build Common App vector database
     # -------------------------
 
-    Chroma.from_documents(
+    rebuild_collection(
         documents=common_app_chunks,
-        embedding=embeddings,
+        embeddings=embeddings,
         collection_name="common_app_official",
         persist_directory=str(COMMON_APP_DB_DIR),
     )
@@ -213,9 +245,9 @@ def main():
     # Build Student vector database
     # -------------------------
 
-    Chroma.from_documents(
+    rebuild_collection(
         documents=student_chunks,
-        embedding=embeddings,
+        embeddings=embeddings,
         collection_name="student_evidence",
         persist_directory=str(STUDENT_DB_DIR),
     )
