@@ -295,6 +295,49 @@ def _number(value: str):
         return None
 
 
+def ask_optional_number(
+    prompt: str,
+    language="en",
+    minimum: float | None = None,
+    maximum: float | None = None,
+    whole_number: bool = False,
+):
+    while True:
+        raw_value = ask(prompt)
+        if not raw_value:
+            return None
+        value = _number(raw_value)
+        valid = value is not None
+        if valid and whole_number:
+            valid = value.is_integer()
+        if valid and minimum is not None:
+            valid = value >= minimum
+        if valid and maximum is not None:
+            valid = value <= maximum
+        if valid:
+            return int(value) if whole_number else value
+
+        if minimum is not None and maximum is not None:
+            message = (
+                f"请输入 {minimum:g} 到 {maximum:g} 之间的数字，或按 Enter 跳过。"
+                if language == "zh"
+                else f"Enter a number from {minimum:g} to {maximum:g}, or press Enter to skip."
+            )
+        elif minimum is not None:
+            message = (
+                f"请输入不小于 {minimum:g} 的数字，或按 Enter 跳过。"
+                if language == "zh"
+                else f"Enter a number of at least {minimum:g}, or press Enter to skip."
+            )
+        else:
+            message = (
+                "请输入有效数字，或按 Enter 跳过。"
+                if language == "zh"
+                else "Enter a valid number, or press Enter to skip."
+            )
+        print(message)
+
+
 def ask_school_size(language="en") -> list[str]:
     if language == "zh":
         print("\n学校规模：")
@@ -413,13 +456,31 @@ def collect_college_preferences(language="en") -> dict:
     zh = language == "zh"
     print("\n请输入你已知的信息；可选问题可按 Enter 跳过。" if zh else "\nEnter what you know. Press Enter to skip an optional question.")
     preferences = {
-        "sat": _number(ask("SAT 分数（可选）" if zh else "SAT score, optional")),
-        "act": _number(ask("ACT 分数（可选）" if zh else "ACT score, optional")),
+        "sat": ask_optional_number(
+            "SAT 分数（可选）" if zh else "SAT score, optional",
+            language,
+            minimum=400,
+            maximum=1600,
+            whole_number=True,
+        ),
+        "act": ask_optional_number(
+            "ACT 分数（可选）" if zh else "ACT score, optional",
+            language,
+            minimum=1,
+            maximum=36,
+            whole_number=True,
+        ),
         "states": ask(
             "偏好的州缩写，用逗号分隔（例如：CA, MI）" if zh else "Preferred state abbreviations, comma-separated (for example: CA, MI)",
             "CA",
         ),
-        "max_cost": _number(ask("助学金前的最高年度费用（可选）" if zh else "Maximum annual cost before aid, optional")),
+        "max_cost": ask_optional_number(
+            "助学金前的最高年度费用（可选）"
+            if zh
+            else "Maximum annual cost before aid, optional",
+            language,
+            minimum=1,
+        ),
         "size": ask_school_size(language),
         "ownership": ask_school_ownership(language),
         "institution_format": ask_institution_format(language),
@@ -839,6 +900,21 @@ def filter_by_size(
     ]
 
 
+def filter_by_max_cost(
+    colleges: Iterable[dict], maximum_cost: float | None
+) -> list[dict]:
+    """Treat the user's stated pre-aid maximum as a strict attendance-cost cap."""
+    colleges = list(colleges)
+    if maximum_cost is None:
+        return colleges
+    return [
+        college
+        for college in colleges
+        if college.get("latest.cost.attendance.academic_year") is not None
+        and college["latest.cost.attendance.academic_year"] <= maximum_cost
+    ]
+
+
 def _size_fit(student_size, preferences: list[str]) -> float:
     if "any" in preferences or student_size is None:
         return 0.0
@@ -994,6 +1070,7 @@ def recommend_colleges(llm, student_context: str, language="en") -> None:
         )
         colleges = filter_by_size(colleges, preferences["size"])
         colleges = filter_by_selectivity(colleges, preferences["competition"])
+        colleges = filter_by_max_cost(colleges, preferences["max_cost"])
         candidate_limit = min(60, max(30, requested_count * 3))
         candidates = rank_colleges(colleges, preferences, candidate_limit)
         if not candidates:
