@@ -37,9 +37,48 @@ PROGRAM_FIELDS = {
 
 UC_SYSTEM_ALIASES = {"uc", "uc schools", "university of california"}
 
-MAJOR_SYSTEM_PROMPT = """You are a college major recommendation assistant.
-Use only the supplied student evidence. Recommend five undergraduate major paths,
+CHINESE_FIELD_ALIASES = {
+    "计算机": "Computer Science",
+    "计算机科学": "Computer Science",
+    "数据科学": "Data Science",
+    "人工智能": "Artificial Intelligence",
+    "软件工程": "Software Engineering",
+    "信息科学": "Information Science",
+    "电气工程": "Electrical Engineering",
+    "电子工程": "Electrical Engineering",
+    "机械工程": "Mechanical Engineering",
+    "土木工程": "Civil Engineering",
+    "化学工程": "Chemical Engineering",
+    "生物医学工程": "Biomedical Engineering",
+    "生物": "Biology",
+    "生物学": "Biology",
+    "化学": "Chemistry",
+    "物理": "Physics",
+    "数学": "Mathematics",
+    "心理学": "Psychology",
+    "经济学": "Economics",
+    "商科": "Business",
+    "社会学": "Sociology",
+    "政治学": "Political Science",
+    "传媒": "Communication and Media Studies",
+    "传播学": "Communication and Media Studies",
+    "艺术": "Visual and Performing Arts",
+    "设计": "Design and Applied Arts",
+}
+
+# College Scorecard exposes the 2021 Carnegie Basic Classification. Code 21 is
+# "Baccalaureate Colleges: Arts & Sciences Focus," used here as a transparent
+# proxy for a liberal arts college rather than a definitive institutional label.
+LIBERAL_ARTS_CARNEGIE_CODES = {21}
+UNIVERSITY_CARNEGIE_CODES = {15, 16, 17, 18, 19, 20}
+
+MAJOR_SYSTEM_PROMPT = """You are an undergraduate field-of-study exploration assistant.
+Use only the supplied student evidence. Recommend five broad undergraduate fields,
 ranked from strongest to weakest fit.
+
+These are exploratory academic directions, not exact university catalog majors.
+Never claim that a particular university offers a specific major, concentration,
+track, curriculum, or resource.
 
 Evidence rules:
 - Cite every supporting experience using its complete first-line label exactly,
@@ -51,11 +90,12 @@ Evidence rules:
   otherwise label it "Exploration to validate".
 - If evidence for a recommendation is weak, say so instead of filling gaps.
 
-For each recommendation provide: major name, fit level, why it fits, supporting
+For each recommendation provide: field name, fit level, why it fits, supporting
 evidence, skills/interests it develops, evidence limitations, and one question
-the student should investigate before choosing it. Do not predict admission or
-career outcomes, and do not claim experience that is not documented. End with a
-short comparison of the top two choices."""
+the student should investigate while exploring specific majors within the field.
+Do not predict admission or career outcomes, and do not claim experience that is
+not documented. End with a short comparison of the top two fields and one concise
+next step telling the student to explore exact majors on university websites."""
 
 COLLEGE_SYSTEM_PROMPT = """You are a US undergraduate college recommendation
 assistant. Use only the supplied student profile, preferences, and College
@@ -68,26 +108,59 @@ Evidence rules:
   selectivity using only the reported overall admission rate.
 - A target preference means the student wants the school considered; it does not
   mean the school is an academic match.
-- Cite the supplied data fields behind each factual statement. Explicitly write
-  "data unavailable" when a needed field is missing.
+- Use the supplied records to support factual statements, but present them as
+  clean user-facing facts. Do not append source-field citations or bracketed
+  implementation references. Omit a metric when its value is unavailable.
 - Never invent rankings, specific programs, campus qualities, admission policies,
   or requirements.
 
-Return sections for Target Schools and Other Data-Supported Matches. For each
-school include: why it was included, verified Scorecard facts, selectivity context,
-cost context, fit limitations, and what must be verified on official university
-websites. End with Data Limitations, not an admission prediction."""
+Create a concise, user-facing report rather than a database audit.
+- Recommend exactly the number requested in the user prompt. Never add weak or
+  unsupported schools merely to increase the count.
+- A school may appear under Target School only if its name matches a target in
+  STUDENT INPUT. Never place alternatives in that section.
+- If a requested target is absent from the candidates or conflicts with filters,
+  explain that clearly in one sentence; do not silently replace it.
+- For each school show only: location; plain-language reason for inclusion;
+  overall admission rate as a percentage when available; undergraduate size;
+  average net price or cost, clearly labeled; and matching reported field.
+- Add a school-specific caution only when the supplied data shows a concrete
+  missing value or conflict with the user's stated budget, size, location,
+  selectivity, target-school, or field preference. Otherwise omit it. Never make
+  generic or speculative suggestions about faculty quality, laboratories,
+  research depth, internships, course quality, student support, or resources.
+- Translate internal preference values (small, low, any, etc.) into natural
+  language in the requested output language.
+- Never display CIP codes, raw API field names, JSON, null, match_score, internal
+  preference keys, candidate counts, bracketed field references, or implementation
+  details. In particular, never output text such as [latest.*],
+  [matching_bachelors_fields.*], or any similar source-field annotation. Show only
+  the human-readable reported field title.
+- Avoid repeating disclaimers for every school. End with exactly three short
+  shared cautions: Scorecard costs are not the student's actual price; overall
+  admission rate is not an individual admission probability; and CIP categories
+  are broad federal fields rather than exact catalog major names. Tell the student
+  to use the recommended field as a starting point for exploring specific majors
+  on official university websites. Do not add cautions about the
+  student's background, cultural adjustment, activities, or academic readiness.
+- Title the final section "说明" when writing in Chinese and "Notes and
+  limitations" when writing in English. Never expose internal field names such as
+  matching_bachelors_fields.
+- Do not repeat the entire student profile or explain the report-generation process.
+End with the localized caution section, not an admission prediction."""
 
-SCHOOL_MAJOR_SYSTEM_PROMPT = """You are a school-specific undergraduate major
-matching assistant. Use only the documented student evidence and the supplied
-College Scorecard four-digit CIP records. The records are broad federal fields of
-study reported at bachelor's credential level (3); they may not equal the exact
-catalog major name or confirm current availability.
+SCHOOL_MAJOR_SYSTEM_PROMPT = """You are a school-specific undergraduate
+field-of-study exploration assistant. Use only the documented student evidence and
+the supplied College Scorecard four-digit CIP records. These records are broad
+federal fields reported at bachelor's credential level (3), not exact catalog
+majors and not confirmation of a particular concentration or track.
 
 For each target college, recommend up to five reported fields that fit the student.
-Cite the exact Scorecard title and CIP code, cite exact numbered student experiences
-with concrete facts, explain limitations, and tell the user to verify the exact
-major/concentration name on the official college catalog. Never invent a program."""
+Cite the exact human-readable Scorecard field title and exact numbered student
+experiences with concrete facts. Do not display CIP codes. Never say the school
+offers a specific major; say it reports a related bachelor's field. End with one
+concise next step asking the student to explore exact majors within those fields on
+the official undergraduate catalog. Never invent a program."""
 
 
 def ask(prompt: str, default: str = "") -> str:
@@ -105,15 +178,15 @@ def stream_response(llm, system_prompt: str, user_prompt: str) -> None:
 def choose_matching_path(language="en") -> str | None:
     if language == "zh":
         print("\n请选择起点：\n")
-        print("1. 我有目标大学——帮我选择专业")
-        print("2. 我有目标专业——帮我选择大学")
-        print("3. 大学和专业都不确定——推荐专业方向")
+        print("1. 我有目标大学——帮我探索相关专业领域")
+        print("2. 我有目标专业领域——帮我选择大学")
+        print("3. 大学和专业领域都不确定——推荐探索方向")
         choice = input("\n请输入选项（1、2 或 3）：").strip()
     else:
         print("\nChoose your starting point:\n")
-        print("1. I have target colleges - help me choose majors")
-        print("2. I have a target major - help me choose colleges")
-        print("3. I am unsure about both - recommend major directions")
+        print("1. I have target colleges - help me explore related fields")
+        print("2. I have a target field - help me choose colleges")
+        print("3. I am unsure about both - recommend fields to explore")
         choice = input("\nEnter choice (1, 2, or 3): ").strip()
     return {"1": "college_first", "2": "major_first", "3": "explore"}.get(choice)
 
@@ -122,15 +195,11 @@ def recommend_majors(llm, student_context: str, evidence_labels: list[str], lang
     prompt = f"""=== DOCUMENTED STUDENT EVIDENCE ===
 {student_context}
 
-Recommend five well-supported undergraduate major paths. Include related or
+Recommend five well-supported undergraduate fields to explore. Include related or
 interdisciplinary alternatives where the evidence supports them."""
     print("\n" + "=" * 60)
-    print("MAJOR RECOMMENDATIONS")
+    print("专业领域探索建议" if language == "zh" else "FIELDS OF STUDY TO EXPLORE")
     print("=" * 60 + "\n")
-    print("Evidence loaded from data/student via chroma/student:")
-    for label in evidence_labels:
-        print(f"- {label}")
-    print()
     stream_response(llm, MAJOR_SYSTEM_PROMPT + output_language_instruction(language), prompt)
 
 
@@ -214,7 +283,7 @@ def recommend_majors_at_colleges(llm, student_context: str, language="en") -> No
 
 Recommend school-specific fields of study supported by both evidence sets."""
     print("\n" + "=" * 60)
-    print("MAJORS AT TARGET COLLEGES")
+    print("目标大学相关专业领域" if language == "zh" else "FIELDS AT TARGET COLLEGES")
     print("=" * 60 + "\n")
     stream_response(llm, SCHOOL_MAJOR_SYSTEM_PROMPT + output_language_instruction(language), prompt)
 
@@ -224,6 +293,120 @@ def _number(value: str):
         return float(value.replace(",", "").strip())
     except (AttributeError, ValueError):
         return None
+
+
+def ask_school_size(language="en") -> list[str]:
+    if language == "zh":
+        print("\n学校规模：")
+        print("1. 小型")
+        print("2. 中型")
+        print("3. 大型")
+        prompt = "请输入选项（可多选，用逗号分隔；不限请按 Enter）"
+    else:
+        print("\nSchool size:")
+        print("1. Small")
+        print("2. Medium")
+        print("3. Large")
+        prompt = "Enter one or more choices separated by commas; press Enter for any size"
+    choices = {"1": "small", "2": "medium", "3": "large"}
+    while True:
+        value = ask(prompt)
+        if not value:
+            return ["any"]
+        selected = [item for item in re.split(r"[,，\s]+", value) if item]
+        if selected and all(item in choices for item in selected):
+            return [choices[item] for item in choices if item in selected]
+        print(
+            "请输入 1、2 或 3；多选时请用逗号分隔。"
+            if language == "zh"
+            else "Please use 1, 2, or 3, separating multiple choices with commas."
+        )
+
+
+def ask_school_ownership(language="en") -> list[str]:
+    if language == "zh":
+        print("\n学校性质：")
+        print("1. 公立")
+        print("2. 私立非营利")
+        print("3. 私立营利")
+        prompt = "请输入选项（可多选，用逗号分隔；不限请按 Enter）"
+    else:
+        print("\nSchool type:")
+        print("1. Public")
+        print("2. Private nonprofit")
+        print("3. Private for-profit")
+        prompt = "Enter one or more choices separated by commas; press Enter for any"
+    choices = {
+        "1": "public",
+        "2": "private_nonprofit",
+        "3": "private_for_profit",
+    }
+    while True:
+        value = ask(prompt)
+        if not value:
+            return ["any"]
+        selected = [item for item in re.split(r"[,，\s]+", value) if item]
+        if selected and all(item in choices for item in selected):
+            return [choices[item] for item in choices if item in selected]
+        print(
+            "请输入 1、2 或 3；多选时请用逗号分隔。"
+            if language == "zh"
+            else "Please use 1, 2, or 3, separating multiple choices with commas."
+        )
+
+
+def ask_selectivity(language="en") -> list[str]:
+    if language == "zh":
+        print("\n学校竞争程度偏好（按学校整体录取率衡量，不代表个人录取概率）：")
+        print("1. 竞争较低（整体录取率 60% 或以上）")
+        print("2. 竞争中等（整体录取率至少 25% 且低于 60%）")
+        print("3. 竞争较高（整体录取率低于 25%）")
+        prompt = "请输入选项（可多选，用逗号分隔；不限请按 Enter）"
+    else:
+        print("\nSchool competition preference (based on overall admission rate, not your personal admission probability):")
+        print("1. Lower competition (overall admission rate of 60% or more)")
+        print("2. Medium competition (overall admission rate at least 25% and below 60%)")
+        print("3. Higher competition (overall admission rate below 25%)")
+        prompt = "Enter one or more choices separated by commas; press Enter for any"
+    choices = {"1": "low", "2": "medium", "3": "high"}
+    while True:
+        value = ask(prompt)
+        if not value:
+            return ["any"]
+        selected = [item for item in re.split(r"[,，\s]+", value) if item]
+        if selected and all(item in choices for item in selected):
+            return [choices[item] for item in choices if item in selected]
+        print(
+            "请输入 1、2 或 3；多选时请用逗号分隔。"
+            if language == "zh"
+            else "Please use 1, 2, or 3, separating multiple choices with commas."
+        )
+
+
+def ask_institution_format(language="en") -> list[str]:
+    if language == "zh":
+        print("\n学校类型偏好：")
+        print("1. 文理学院")
+        print("2. 综合性大学")
+        prompt = "请输入选项（可多选，用逗号分隔；均可请按 Enter）"
+    else:
+        print("\nInstitution format preference:")
+        print("1. Liberal arts college")
+        print("2. University")
+        prompt = "Enter one or more choices separated by commas; press Enter for either"
+    choices = {"1": "liberal_arts", "2": "university"}
+    while True:
+        value = ask(prompt)
+        if not value:
+            return ["either"]
+        selected = [item for item in re.split(r"[,，\s]+", value) if item]
+        if selected and all(item in choices for item in selected):
+            return [choices[item] for item in choices if item in selected]
+        print(
+            "请输入 1 或 2；多选时请用逗号分隔。"
+            if language == "zh"
+            else "Please use 1 or 2, separating multiple choices with commas."
+        )
 
 
 def collect_college_preferences(language="en") -> dict:
@@ -237,14 +420,13 @@ def collect_college_preferences(language="en") -> dict:
             "CA",
         ),
         "max_cost": _number(ask("助学金前的最高年度费用（可选）" if zh else "Maximum annual cost before aid, optional")),
-        "size": ask("学校规模：小型、中型、大型或不限" if zh else "Preferred size: small, medium, large, or any", "不限" if zh else "any").lower(),
-        "competition": ask(
-            "整体竞争程度：低、中、高、均衡或不限" if zh else "Preferred overall competition: low, medium, high, or balanced",
-            "均衡" if zh else "balanced",
-        ).lower(),
-        "major": ask(
-            "意向专业或学术领域（请使用英文名称，例如 Computer Science）"
-            if zh else "Intended major or academic area",
+        "size": ask_school_size(language),
+        "ownership": ask_school_ownership(language),
+        "institution_format": ask_institution_format(language),
+        "competition": ask_selectivity(language),
+        "field": ask(
+            "意向专业领域（可输入中文或英文，例如：计算机科学 / Computer Science）"
+            if zh else "Intended field of study (Chinese or English)",
             "Computer Science",
         ),
         "targets": ask(
@@ -252,16 +434,7 @@ def collect_college_preferences(language="en") -> dict:
             if zh else "Target schools/systems, comma-separated (for example: UC, UMich)",
             "No specific target",
         ),
-        "other": ask("其他偏好（可选）" if zh else "Other priorities, optional", "无其他偏好" if zh else "No additional preferences"),
     }
-    preferences["size"] = {
-        "小": "small", "小型": "small", "中": "medium", "中型": "medium",
-        "大": "large", "大型": "large", "不限": "any",
-    }.get(preferences["size"], preferences["size"])
-    preferences["competition"] = {
-        "低": "low", "中": "medium", "高": "high", "均衡": "balanced",
-        "不限": "balanced",
-    }.get(preferences["competition"], preferences["competition"])
     resolved_targets, discovered_states = resolve_target_names(
         preferences["targets"], preferences["states"]
     )
@@ -275,8 +448,99 @@ def collect_college_preferences(language="en") -> dict:
     return preferences
 
 
-def program_field_for(major: str) -> str | None:
-    lowered = major.lower()
+def resolve_field_query(llm, field_query: str, language="en") -> str:
+    """Translate a Chinese field query to a confirmed English search term."""
+    current = field_query.strip()
+    while re.search(r"[\u3400-\u9fff]", current):
+        translated = CHINESE_FIELD_ALIASES.get(current)
+        if not translated:
+            try:
+                response = llm.invoke(
+                    [
+                        (
+                            "system",
+                            "Translate the user's Chinese academic field into one concise, standard English field-of-study name suitable for matching U.S. federal CIP field titles. Return only the English name, with no explanation, quotation marks, list, or punctuation at the end.",
+                        ),
+                        ("user", current),
+                    ]
+                )
+                translated = str(response.content).strip().strip('"\'').rstrip(".")
+            except Exception as exc:
+                if os.getenv("COLLEGE_GUIDANCE_DEBUG", "").lower() == "true":
+                    print(f"Field translation failed: {exc}")
+                translated = ""
+
+        if not translated or re.search(r"[\u3400-\u9fff]", translated):
+            current = ask(
+                "暂时无法可靠翻译该领域，请输入英文名称"
+                if language == "zh"
+                else "The field could not be translated reliably; please enter its English name"
+            )
+            continue
+
+        print(
+            f"已识别为：{translated}"
+            if language == "zh"
+            else f"Recognized field: {translated}"
+        )
+        correction = ask(
+            "按 Enter 确认，或输入修改后的名称"
+            if language == "zh"
+            else "Press Enter to confirm, or enter a corrected field name"
+        )
+        current = correction or translated
+    return current
+
+
+def reconcile_known_target_conflicts(preferences: dict, language="en") -> bool:
+    """Offer a clear resolution for known system-wide target conflicts."""
+    targets = parse_targets(preferences.get("targets", ""))
+    if not any(target in UC_SYSTEM_ALIASES for target in targets):
+        return True
+
+    conflicts = []
+    if "any" not in preferences["ownership"] and "public" not in preferences["ownership"]:
+        conflicts.append("ownership")
+    if (
+        "either" not in preferences["institution_format"]
+        and "university" not in preferences["institution_format"]
+    ):
+        conflicts.append("institution_format")
+    if not conflicts:
+        return True
+
+    if language == "zh":
+        print("\n目标大学系统 UC 与当前筛选条件冲突：")
+        if "ownership" in conflicts:
+            print("- UC 属于公立大学系统，但学校性质未选择“公立”。")
+        if "institution_format" in conflicts:
+            print("- UC 校区属于综合性大学，但学校类型未选择“综合性大学”。")
+        prompt = "输入 1 自动加入所需类别，输入 2 保留条件并排除 UC，输入 0 重新填写条件"
+    else:
+        print("\nThe UC target conflicts with the current filters:")
+        if "ownership" in conflicts:
+            print('- UC is a public university system, but "Public" was not selected.')
+        if "institution_format" in conflicts:
+            print('- UC campuses are universities, but "University" was not selected.')
+        prompt = "Enter 1 to add the required categories, 2 to keep the filters and exclude UC, or 0 to re-enter the filters"
+
+    while True:
+        choice = ask(prompt)
+        if choice == "1":
+            if "ownership" in conflicts:
+                preferences["ownership"].append("public")
+            if "institution_format" in conflicts:
+                preferences["institution_format"].append("university")
+            return True
+        if choice == "2":
+            return True
+        if choice == "0":
+            return False
+        print("请输入 1、2 或 0。" if language == "zh" else "Please enter 1, 2, or 0.")
+
+
+def program_field_for(field_name: str) -> str | None:
+    lowered = field_name.lower()
     return next((field for keyword, field in PROGRAM_FIELDS.items() if keyword in lowered), None)
 
 
@@ -455,6 +719,8 @@ def fetch_colleges(preferences: dict) -> list[dict]:
         "school.city",
         "school.state",
         "school.school_url",
+        "school.ownership",
+        "school.carnegie_basic",
         "latest.admissions.admission_rate.overall",
         "latest.admissions.sat_scores.average.overall",
         "latest.admissions.act_scores.midpoint.cumulative",
@@ -463,7 +729,7 @@ def fetch_colleges(preferences: dict) -> list[dict]:
         "latest.cost.avg_net_price.overall",
         "latest.completion.rate_suppressed.overall",
     ]
-    program_field = program_field_for(preferences["major"])
+    program_field = program_field_for(preferences["field"])
     if program_field:
         fields.append(program_field)
     params = {
@@ -473,6 +739,16 @@ def fetch_colleges(preferences: dict) -> list[dict]:
         "fields": ",".join(fields),
         "per_page": 100,
     }
+    ownership = preferences.get("ownership")
+    if "any" not in ownership:
+        ownership_codes = {
+            "public": "1",
+            "private_nonprofit": "2",
+            "private_for_profit": "3",
+        }
+        params["school.ownership"] = ",".join(
+            ownership_codes[item] for item in ownership
+        )
     states = [s.strip().upper() for s in preferences["states"].split(",") if s.strip()]
     states = sorted(set(states))
     if states:
@@ -500,24 +776,91 @@ def fetch_colleges(preferences: dict) -> list[dict]:
     return colleges
 
 
-def _size_fit(student_size, preference: str) -> float:
-    if preference == "any" or student_size is None:
+def filter_by_institution_format(
+    colleges: Iterable[dict], preferences: list[str]
+) -> list[dict]:
+    colleges = list(colleges)
+    if "either" in preferences:
+        return colleges
+    accepted_codes = set()
+    if "liberal_arts" in preferences:
+        accepted_codes.update(LIBERAL_ARTS_CARNEGIE_CODES)
+    if "university" in preferences:
+        accepted_codes.update(UNIVERSITY_CARNEGIE_CODES)
+    return [
+        college for college in colleges
+        if college.get("school.carnegie_basic") in accepted_codes
+    ]
+
+
+def filter_by_selectivity(
+    colleges: Iterable[dict], preferences: list[str]
+) -> list[dict]:
+    """Apply the user's admission-rate category as a strict data filter."""
+    colleges = list(colleges)
+    if "any" in preferences:
+        return colleges
+
+    def matches(college: dict) -> bool:
+        admission_rate = college.get("latest.admissions.admission_rate.overall")
+        if admission_rate is None:
+            return False
+        return any(
+            (preference == "high" and admission_rate < 0.25)
+            or (preference == "medium" and 0.25 <= admission_rate < 0.60)
+            or (preference == "low" and admission_rate >= 0.60)
+            for preference in preferences
+        )
+
+    return [college for college in colleges if matches(college)]
+
+
+def filter_by_size(
+    colleges: Iterable[dict], preferences: list[str]
+) -> list[dict]:
+    """Keep schools whose reported undergraduate size matches any selected size."""
+    colleges = list(colleges)
+    if "any" in preferences:
+        return colleges
+    ranges = {
+        "small": (0, 5000),
+        "medium": (5000, 15000),
+        "large": (15000, float("inf")),
+    }
+    selected_ranges = [ranges[preference] for preference in preferences]
+    return [
+        college
+        for college in colleges
+        if college.get("latest.student.size") is not None
+        and any(
+            low <= college["latest.student.size"] < high
+            for low, high in selected_ranges
+        )
+    ]
+
+
+def _size_fit(student_size, preferences: list[str]) -> float:
+    if "any" in preferences or student_size is None:
         return 0.0
     ranges = {"small": (0, 5000), "medium": (5000, 15000), "large": (15000, float("inf"))}
-    low, high = ranges.get(preference, (0, float("inf")))
-    return 1.0 if low <= student_size < high else -0.5
+    matches_preference = any(
+        low <= student_size < high
+        for preference in preferences
+        for low, high in [ranges[preference]]
+    )
+    return 1.0 if matches_preference else -0.5
 
 
-def _competition_fit(admission_rate, preference: str) -> float:
-    if preference == "balanced" or admission_rate is None:
+def _competition_fit(admission_rate, preferences: list[str]) -> float:
+    if "any" in preferences or admission_rate is None:
         return 0.0
-    if preference == "high":
-        return 1.0 if admission_rate < 0.25 else -0.5
-    if preference == "medium":
-        return 1.0 if 0.25 <= admission_rate < 0.60 else -0.5
-    if preference == "low":
-        return 1.0 if admission_rate >= 0.60 else -0.5
-    return 0.0
+    matches_preference = any(
+        (preference == "high" and admission_rate < 0.25)
+        or (preference == "medium" and 0.25 <= admission_rate < 0.60)
+        or (preference == "low" and admission_rate >= 0.60)
+        for preference in preferences
+    )
+    return 1.0 if matches_preference else -0.5
 
 
 def program_match_score(query: str, program: dict) -> float:
@@ -527,7 +870,18 @@ def program_match_score(query: str, program: dict) -> float:
         return 0.0
     if normalized_query in title:
         return 1.0
-    return SequenceMatcher(None, normalized_query, title).ratio()
+    query_tokens = set(normalized_query.split())
+    title_tokens = set(title.split())
+    generic_terms = {
+        "and", "general", "other", "related", "studies", "study",
+        "science", "sciences", "engineering",
+    }
+    distinctive_tokens = query_tokens - generic_terms
+    if distinctive_tokens and not distinctive_tokens.issubset(title_tokens):
+        return 0.0
+    token_coverage = len(query_tokens & title_tokens) / len(query_tokens)
+    fuzzy_similarity = SequenceMatcher(None, normalized_query, title).ratio()
+    return max(token_coverage, fuzzy_similarity)
 
 
 def matching_programs(query: str, programs: list[dict], limit: int = 5) -> list[dict]:
@@ -539,13 +893,15 @@ def matching_programs(query: str, programs: list[dict], limit: int = 5) -> list[
     return [
         {**program, "match_score": round(score, 3)}
         for score, program in scored[:limit]
-        if score >= 0.45
+        if score >= 0.65
     ]
 
 
-def rank_colleges(colleges: Iterable[dict], preferences: dict) -> list[dict]:
+def rank_colleges(
+    colleges: Iterable[dict], preferences: dict, candidate_limit: int = 30
+) -> list[dict]:
     ranked = []
-    program_field = program_field_for(preferences["major"])
+    program_field = program_field_for(preferences["field"])
     targets_requested = parse_targets(preferences.get("targets", ""))
     for college in colleges:
         cost = college.get("latest.cost.attendance.academic_year")
@@ -567,31 +923,102 @@ def rank_colleges(colleges: Iterable[dict], preferences: dict) -> list[dict]:
     # candidate slots with the strongest alternatives.
     targets = [college for is_target, _, college in ranked if is_target]
     alternatives = [college for is_target, _, college in ranked if not is_target]
-    return (targets + alternatives)[:30]
+    return (targets + alternatives)[:candidate_limit]
+
+
+def ask_recommendation_count(language="en") -> int:
+    """Ask for a useful report size while preventing excessively large prompts."""
+    prompt = (
+        "希望推荐几所大学（1–20）"
+        if language == "zh"
+        else "How many colleges would you like recommended (1-20)"
+    )
+    while True:
+        value = ask(prompt)
+        if value.isdigit() and 1 <= int(value) <= 20:
+            return int(value)
+        print(
+            "请输入 1 到 20 之间的整数。"
+            if language == "zh"
+            else "Please enter a whole number from 1 to 20."
+        )
+
+
+def print_no_matching_colleges(language="en") -> None:
+    print(
+        "\n当前条件下没有找到同时符合筛选条件和专业领域要求的大学，请调整条件后重试。"
+        if language == "zh"
+        else "\nNo colleges matched both the selected filters and field-of-study requirement. Please adjust the conditions and try again."
+    )
+
+
+def confirm_available_count(requested: int, available: int, language="en") -> int | None:
+    """Negotiate a smaller report instead of silently padding weak matches."""
+    if available >= requested:
+        return requested
+    if available == 0:
+        print_no_matching_colleges(language)
+        return 0
+
+    print(
+        f"\n当前条件下只能找到 {available} 所有充分数据支持的学校，少于你希望的 {requested} 所。"
+        if language == "zh"
+        else f"\nOnly {available} well-supported schools were found under the current conditions, fewer than the {requested} requested."
+    )
+    prompt = (
+        f"输入 1 接受推荐这 {available} 所，输入 0 返回并调整条件"
+        if language == "zh"
+        else f"Enter 1 to continue with {available} schools, or 0 to return and adjust the conditions"
+    )
+    while True:
+        choice = ask(prompt)
+        if choice == "1":
+            return available
+        if choice == "0":
+            return 0
+        print("请输入 1 或 0。" if language == "zh" else "Please enter 1 or 0.")
 
 
 def recommend_colleges(llm, student_context: str, language="en") -> None:
-    preferences = collect_college_preferences(language)
-    colleges = fetch_colleges(preferences)
-    candidates = rank_colleges(colleges, preferences)
-    if not candidates:
-        print("\nNo colleges matched those filters. Try adding more states or fewer constraints.")
-        return
-    verified_candidates = []
-    fields_by_school = fetch_bachelors_fields_for_schools(
-        [college["id"] for college in candidates]
-    )
-    for college in candidates:
-        programs = fields_by_school.get(college["id"], [])
-        matches = matching_programs(preferences["major"], programs)
-        if matches:
-            verified_candidates.append({**college, "matching_bachelors_fields": matches})
-    if not verified_candidates:
-        print(
-            "\nNo candidate college had a sufficiently similar reported bachelor's "
-            "field. Try a broader major term."
+    while True:
+        preferences = collect_college_preferences(language)
+        preferences["field"] = resolve_field_query(
+            llm, preferences["field"], language
         )
-        return
+        if not reconcile_known_target_conflicts(preferences, language):
+            continue
+        requested_count = ask_recommendation_count(language)
+        colleges = fetch_colleges(preferences)
+        colleges = filter_by_institution_format(
+            colleges, preferences["institution_format"]
+        )
+        colleges = filter_by_size(colleges, preferences["size"])
+        colleges = filter_by_selectivity(colleges, preferences["competition"])
+        candidate_limit = min(60, max(30, requested_count * 3))
+        candidates = rank_colleges(colleges, preferences, candidate_limit)
+        if not candidates:
+            print_no_matching_colleges(language)
+            continue
+        verified_candidates = []
+        fields_by_school = fetch_bachelors_fields_for_schools(
+            [college["id"] for college in candidates]
+        )
+        for college in candidates:
+            programs = fields_by_school.get(college["id"], [])
+            matches = matching_programs(preferences["field"], programs)
+            if matches:
+                verified_candidates.append(
+                    {**college, "matching_bachelors_fields": matches}
+                )
+        final_count = confirm_available_count(
+            requested_count, len(verified_candidates), language
+        )
+        if final_count is None:
+            return
+        if final_count == 0:
+            continue
+        verified_candidates = verified_candidates[:final_count]
+        break
 
     prompt = f"""=== DOCUMENTED STUDENT EVIDENCE ===
 {student_context}
@@ -602,23 +1029,27 @@ def recommend_colleges(llm, student_context: str, language="en") -> None:
 === COLLEGE SCORECARD CANDIDATES ===
 {json.dumps(verified_candidates, ensure_ascii=False, indent=2)}
 
-Select 9-12 useful options when the data supports that many. Explain that the
+Recommend exactly {final_count} schools. Explain that the
 Scorecard cost is not necessarily the student's net price. Do not derive an
 admission probability or Reach, Target, Safety, or Likely label from overall
 admission rate. Interpret competition preference only as requested institutional
-selectivity."""
+selectivity. The requested target is {preferences.get("targets", "")!r}. Only that
+school or system may be labeled as a target; all other schools are alternatives."""
     print("\n" + "=" * 60)
-    print("COLLEGE RECOMMENDATIONS")
+    print("大学推荐" if language == "zh" else "COLLEGE RECOMMENDATIONS")
     print("=" * 60 + "\n")
-    print(f"Loaded {len(colleges)} matching four-year colleges from College Scorecard.")
     target = preferences.get("targets", "")
     if target and target.lower() != "no specific target":
-        print(f"Target preference retained in candidate selection: {target}")
-        missing = unmatched_targets(colleges, target)
+        missing = unmatched_targets(verified_candidates, target)
         if missing:
-            print("Warning: these targets were not matched in College Scorecard:")
+            print(
+                "提示：以下目标学校或大学系统已被识别，但当前筛选条件下没有符合要求的校区："
+                if language == "zh"
+                else "Note: these target schools or systems were recognized, but no qualifying campus remained under the current filters:"
+            )
             for name in missing:
-                print(f"- {name}")
+                display_name = "UC" if name in UC_SYSTEM_ALIASES else name
+                print(f"- {display_name}")
     print()
     stream_response(llm, COLLEGE_SYSTEM_PROMPT + output_language_instruction(language), prompt)
 

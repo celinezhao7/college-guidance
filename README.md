@@ -9,7 +9,7 @@ Chroma, Qwen, and the U.S. Department of Education College Scorecard API.
 
 The project uses retrieval-augmented generation (RAG) to ground recommendations
 in documented student experiences and official guidance. It supports essay prompt
-selection as well as college and major exploration.
+selection as well as college and field-of-study exploration.
 
 ## Features
 
@@ -26,13 +26,17 @@ Recommends four UC Personal Insight Questions using:
 Recommends three Common App essay prompts and identifies the strongest overall
 choice using official Common App guidance and retrieved student evidence.
 
-### 3. College and major matching
+### 3. College and field-of-study matching
 
 Provides three starting paths:
 
-1. Target colleges → recommend relevant fields of study at those colleges
-2. Target major → recommend colleges that report related bachelor's fields
-3. Unsure about both → recommend major directions from student evidence
+1. Target colleges → recommend relevant reported fields at those colleges
+2. Target field → recommend colleges that report related bachelor's fields
+3. Unsure about both → recommend fields to explore from student evidence
+
+This feature recommends broad fields of study, not exact university catalog
+majors. Students use the results as a starting point and then explore specific
+majors, concentrations, and degree names on each university's official website.
 
 College information comes from the College Scorecard API. School-specific fields
 of study use four-digit Classification of Instructional Programs (CIP) records
@@ -45,10 +49,15 @@ The program supports:
 - fuzzy matching against the official school catalog
 - user confirmation when a name is ambiguous
 - location, cost, size, and institutional-selectivity preferences
+- public, private nonprofit, private for-profit, or unrestricted school-type filtering
+- liberal arts college, university, or either format filtering, using College
+  Scorecard's Carnegie classification as an approximate category
 - verified College Scorecard facts such as overall admission rate, student size,
   cost, completion rate, and reported fields of study
 - an English or Simplified Chinese interface and recommendation output, selected
   when the application starts
+- a user-selected college recommendation count; if too few supported matches are
+  available, the program asks whether to continue with fewer or adjust the filters
 
 ## Important limitations
 
@@ -56,8 +65,8 @@ This tool does not predict admission outcomes.
 
 - Overall admission rate is not an individual admission probability.
 - A target school preference does not mean the school is an academic match.
-- College Scorecard CIP fields are federal reporting categories and may not match
-  the exact current major or concentration name in a university catalog.
+- College Scorecard CIP fields are federal reporting categories, not exact
+  university catalog majors or concentrations.
 - Cost of attendance and average net price are not a student's personal price.
 - Program availability, application requirements, deadlines, and current costs
   should always be verified on official university websites.
@@ -73,7 +82,7 @@ college-guidance/
 │   └── uc_official/           # UC guidance documents
 ├── src/
 │   ├── build_index.py         # Builds the Chroma vector indexes
-│   ├── college_major.py       # College Scorecard and major-matching logic
+│   ├── college_major.py       # College Scorecard and field-matching logic
 │   ├── i18n.py                # CLI localization strings and helpers
 │   └── recommend.py           # Main command-line application
 ├── .env.example
@@ -135,6 +144,7 @@ DASHSCOPE_API_KEY=your_dashscope_api_key
 DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 QWEN_MODEL=qwen3.5-plus
 COLLEGE_SCORECARD_API_KEY=your_data_gov_api_key
+COLLEGE_GUIDANCE_DEBUG=false
 ```
 
 Get a College Scorecard API key from
@@ -188,24 +198,25 @@ Choose `1` for English or `2` for Simplified Chinese at startup. The selected
 language applies to the command-line interface and AI-generated recommendations.
 Official school names, source evidence labels, PIQ/prompt numbers, and CIP codes
 remain unchanged so that citations can still be checked against their sources.
-In the Chinese interface, enter college and major names in English (for example,
-`University of Michigan` and `Computer Science`) for the most reliable matching
-against the English-language College Scorecard catalog.
+In the Chinese interface, college names should still be entered in English. Fields
+of study may be entered in Chinese or English. Common Chinese fields use built-in
+translations; other Chinese entries are translated to an English search term and
+shown to the user for confirmation before College Scorecard matching.
 
 Main menu:
 
 ```text
 1. UC PIQ Recommendation
 2. Common App Essay Prompt Recommendation
-3. College & Major Matching
+3. College & Field-of-Study Matching
 ```
 
-College and Major Matching menu:
+College and Field-of-Study Matching menu:
 
 ```text
-1. I have target colleges - help me choose majors
-2. I have a target major - help me choose colleges
-3. I am unsure about both - recommend major directions
+1. I have target colleges - help me explore related fields
+2. I have a target field - help me choose colleges
+3. I am unsure about both - recommend fields to explore
 ```
 
 The first College Scorecard school-name search may download an official school
@@ -221,7 +232,7 @@ Locally stored data includes:
 - API credentials in `.env`
 - an optional generated College Scorecard school catalog cache
 
-Interactive answers such as location, budget, school size, intended major, and
+Interactive answers such as location, budget, school size, intended field, and
 target schools are held in memory during the current run and are not written to a
 user-profile file. They are included in prompts sent to the configured Qwen API
 when generating recommendations.
@@ -263,13 +274,15 @@ research support, not as professional admissions advice or an admission forecast
 
 根据 Common App 官方指导和检索到的学生经历，推荐三道 Common App 主文书题目，并选出最适合的总体选择。
 
-#### 3. 大学与专业匹配
+#### 3. 大学与专业领域匹配
 
 提供三种起点：
 
-1. 已有目标大学 → 推荐这些大学中相关的学习领域；
-2. 已有目标专业 → 推荐报告了相关本科专业领域的大学；
-3. 两者都不确定 → 根据学生经历推荐专业方向。
+1. 已有目标大学 → 推荐这些大学报告的相关本科领域；
+2. 已有目标专业领域 → 推荐报告了相关本科领域的大学；
+3. 两者都不确定 → 根据学生经历推荐值得探索的领域。
+
+此功能推荐的是宽泛的专业领域，而不是大学课程目录中的确切专业。学生可以把结果作为探索起点，再前往各大学官网了解具体专业、方向和学位名称。
 
 大学信息来自 College Scorecard API。学校特定的专业领域使用四位 Classification of Instructional Programs（CIP）记录，本科学位层级为 `3`。
 
@@ -280,8 +293,12 @@ research support, not as professional admissions advice or an admission forecast
 - 根据官方学校目录进行模糊匹配；
 - 名称有歧义时要求用户确认；
 - 地理位置、费用、学校规模和院校选择性偏好；
+- 公立、私立非营利、私立营利或不限的学校性质筛选；
+- 文理学院、综合性大学或两者均可的学校类型筛选；该筛选使用 College Scorecard
+  中的 Carnegie 分类作为近似类别，并非实时或法定的院校类型认证；
 - College Scorecard 中经过验证的整体录取率、学生人数、费用、毕业率和专业领域等信息；
 - 启动时选择英文或简体中文界面，并使用所选语言生成推荐结果。
+- 由用户决定大学推荐数量；如果有充分数据支持的学校不足，程序会询问是接受较少结果还是调整筛选条件。
 
 ### 重要限制
 
@@ -304,7 +321,7 @@ college-guidance/
 │   └── uc_official/           # UC 官方指导文档
 ├── src/
 │   ├── build_index.py         # 构建 Chroma 向量索引
-│   ├── college_major.py       # College Scorecard 与专业匹配逻辑
+│   ├── college_major.py       # College Scorecard 与专业领域匹配逻辑
 │   ├── i18n.py                # 命令行界面本地化文本
 │   └── recommend.py           # 主命令行程序
 ├── .env.example
@@ -365,6 +382,7 @@ DASHSCOPE_API_KEY=your_dashscope_api_key
 DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 QWEN_MODEL=qwen3.5-plus
 COLLEGE_SCORECARD_API_KEY=your_data_gov_api_key
+COLLEGE_GUIDANCE_DEBUG=false
 ```
 
 可在 [api.data.gov](https://api.data.gov/signup/) 申请 College Scorecard API 密钥。
@@ -411,22 +429,22 @@ python src\recommend.py
 
 启动时选择 `1` 使用英文，或选择 `2` 使用简体中文。所选语言会应用到命令行界面和 AI 生成的推荐结果。
 
-为确保能够准确匹配英文 College Scorecard 目录，中文界面中的大学和专业名称仍建议使用英文输入，例如 `University of Michigan` 和 `Computer Science`。学校官方名称、证据标签、PIQ/题目编号和 CIP 编码会保留原文，以便核查来源。
+中文界面中的大学名称仍应使用英文输入。专业领域可以输入中文或英文；常见中文领域会使用内置对照表转换，其他中文输入会先翻译成英文搜索词并请用户确认，再与 College Scorecard 数据匹配。学校官方名称、证据标签、PIQ/题目编号和 CIP 编码会保留原文，以便核查来源。
 
 主菜单：
 
 ```text
 1. UC 个人洞察问题（PIQ）推荐
 2. Common App 主文书题目推荐
-3. 大学与专业匹配
+3. 大学与专业领域匹配
 ```
 
-大学与专业匹配菜单：
+大学与专业领域匹配菜单：
 
 ```text
-1. 我有目标大学——帮我选择专业
-2. 我有目标专业——帮我选择大学
-3. 大学和专业都不确定——推荐专业方向
+1. 我有目标大学——帮我探索相关专业领域
+2. 我有目标专业领域——帮我选择大学
+3. 大学和专业领域都不确定——推荐探索方向
 ```
 
 第一次搜索学校名称时，程序可能会下载 College Scorecard 官方学校目录缓存。缓存只包含公开的学校 ID、名称、城市和州，不包含用户回答。

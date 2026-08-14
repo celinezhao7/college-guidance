@@ -14,7 +14,7 @@ MESSAGES = {
     "choose_system": {"en": "Choose application system:", "zh": "请选择申请系统："},
     "menu_uc": {"en": "1. UC PIQ Recommendation", "zh": "1. UC 个人洞察问题（PIQ）推荐"},
     "menu_common": {"en": "2. Common App Essay Prompt Recommendation", "zh": "2. Common App 主文书题目推荐"},
-    "menu_college": {"en": "3. College & Major Matching", "zh": "3. 大学与专业匹配"},
+    "menu_college": {"en": "3. College & Field-of-Study Matching", "zh": "3. 大学与专业领域匹配"},
     "choice_123": {"en": "Enter choice (1, 2, or 3): ", "zh": "请输入选项（1、2 或 3）："},
     "invalid_123": {"en": "Invalid choice. Please enter 1, 2, or 3.", "zh": "选项无效，请输入 1、2 或 3。"},
     "unable": {"en": "Unable to create recommendations: {error}", "zh": "无法生成推荐：{error}"},
@@ -52,7 +52,7 @@ def output_language_instruction(language: str) -> str:
     if language == "zh":
         return (
             "\n\nLANGUAGE REQUIREMENT: Write the entire recommendation in Simplified Chinese. "
-            "Keep official school names, CIP codes, PIQ/prompt numbers, source field names, "
+            "Keep official school names, PIQ/prompt numbers, source field names, "
             "and student experience labels exactly as supplied."
         )
     return "\n\nLANGUAGE REQUIREMENT: Write the entire recommendation in English."

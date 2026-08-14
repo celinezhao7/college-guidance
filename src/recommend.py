@@ -13,6 +13,8 @@ from i18n import choose_language, output_language_instruction, tr
 
 load_dotenv()
 
+DEBUG_OUTPUT = os.getenv("COLLEGE_GUIDANCE_DEBUG", "").lower() in {"1", "true", "yes"}
+
 
 # ============================================================
 # Paths
@@ -763,26 +765,20 @@ def main():
 
     retrieval_end = time.time()
 
-    print("\n" + tr(language, "retrieved_guidance", count=len(guidance_docs), name=guidance_name))
-
-    print(tr(language, "retrieved_student", count=len(student_docs)))
-
-    print(tr(language, "retrieval_time", seconds=retrieval_end - retrieval_start))
+    if DEBUG_OUTPUT:
+        print("\n" + tr(language, "retrieved_guidance", count=len(guidance_docs), name=guidance_name))
+        print(tr(language, "retrieved_student", count=len(student_docs)))
+        print(tr(language, "retrieval_time", seconds=retrieval_end - retrieval_start))
 
     # --------------------------------------------------------
     # Show retrieved student evidence
     # --------------------------------------------------------
 
-    print("\n" + tr(language, "student_evidence") + "\n")
-
-    for doc in student_docs:
-
-        first_line = doc.page_content.splitlines()[0]
-
-        print(
-            f"- {first_line} "
-            f"[role={doc.metadata.get('chunk_role')}]"
-        )
+    if DEBUG_OUTPUT:
+        print("\n" + tr(language, "student_evidence") + "\n")
+        for doc in student_docs:
+            first_line = doc.page_content.splitlines()[0]
+            print(f"- {first_line} [role={doc.metadata.get('chunk_role')}]")
 
     # --------------------------------------------------------
     # Format contexts
@@ -870,21 +866,22 @@ for this student and identify the Best Overall Choice.
     # Timing
     # --------------------------------------------------------
 
-    print("\n")
+    if DEBUG_OUTPUT:
+        print("\n")
 
-    if first_token_time is not None:
+    if DEBUG_OUTPUT and first_token_time is not None:
 
         print(tr(language, "ttft", seconds=first_token_time - generation_start))
 
         print(tr(language, "ttfo", seconds=first_token_time - total_start))
 
-    else:
+    elif DEBUG_OUTPUT:
 
         print(tr(language, "ttft_na"))
 
-    print(tr(language, "generation_time", seconds=generation_end - generation_start))
-
-    print(tr(language, "total_time", seconds=total_end - total_start))
+    if DEBUG_OUTPUT:
+        print(tr(language, "generation_time", seconds=generation_end - generation_start))
+        print(tr(language, "total_time", seconds=total_end - total_start))
 
 
 if __name__ == "__main__":
