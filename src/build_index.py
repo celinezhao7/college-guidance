@@ -9,6 +9,8 @@ from langchain_core.documents import Document
 from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
 
+from student_profiles import get_student_profile_dir, list_student_profiles
+
 
 load_dotenv()
 
@@ -21,11 +23,6 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 UC_DIR = BASE_DIR / "data" / "uc_official"
 COMMON_APP_DIR = BASE_DIR / "data" / "common_app_official"
-
-student_data_setting = os.getenv("STUDENT_DATA_DIR", "data/student")
-STUDENT_DIR = Path(student_data_setting)
-if not STUDENT_DIR.is_absolute():
-    STUDENT_DIR = BASE_DIR / STUDENT_DIR
 
 UC_DB_DIR = BASE_DIR / "chroma" / "uc"
 COMMON_APP_DB_DIR = BASE_DIR / "chroma" / "common_app"
@@ -165,25 +162,24 @@ def load_common_app_documents():
 # Load student documents
 # -------------------------
 
-def load_student_documents():
+def load_student_documents(profile_path: Path):
     documents = []
 
-    for path in STUDENT_DIR.glob("*.docx"):
-        text = load_docx(path)
-        chunks = split_by_separator(text)
+    text = load_docx(profile_path)
+    chunks = split_by_separator(text)
 
-        for index, chunk in enumerate(chunks):
-            documents.append(
-                Document(
-                    page_content=chunk,
-                    metadata={
-                        "source": path.name,
-                        "type": "student_evidence",
-                        "chunk_index": index,
-                        "chunk_role": classify_student_chunk(chunk),
-                    },
-                )
+    for index, chunk in enumerate(chunks):
+        documents.append(
+            Document(
+                page_content=chunk,
+                metadata={
+                    "source": profile_path.name,
+                    "type": "student_evidence",
+                    "chunk_index": index,
+                    "chunk_role": classify_student_chunk(chunk),
+                },
             )
+        )
 
     return documents
 
@@ -193,6 +189,12 @@ def load_student_documents():
 # -------------------------
 
 def main():
+
+    student_profiles = list_student_profiles()
+    if not student_profiles:
+        raise FileNotFoundError(
+            f"No .docx student profiles found in {get_student_profile_dir()}"
+        )
 
     embeddings = OpenAIEmbeddings(
         model="text-embedding-v4",
@@ -209,17 +211,20 @@ def main():
 
     uc_chunks = load_uc_documents()
     common_app_chunks = load_common_app_documents()
-    student_chunks = load_student_documents()
+    student_chunks = []
+    for student_profile in student_profiles:
+        student_chunks.extend(load_student_documents(student_profile))
 
     print(f"UC chunks: {len(uc_chunks)}")
     print(f"Common App chunks: {len(common_app_chunks)}")
+    print(f"Student profiles: {len(student_profiles)}")
     print(f"Student chunks: {len(student_chunks)}")
 
     print("\nStudent chunk roles:")
 
     for doc in student_chunks:
         print(
-            f"- {doc.metadata['chunk_role']}: "
+            f"- {doc.metadata['source']} | {doc.metadata['chunk_role']}: "
             f"{doc.page_content.splitlines()[0]}"
         )
 

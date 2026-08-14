@@ -8,6 +8,7 @@ from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 
 from college_major import run_college_major_matching
 from i18n import choose_language, output_language_instruction, tr
+from student_profiles import choose_student_profile, list_student_profiles
 
 
 load_dotenv()
@@ -80,23 +81,20 @@ common_app_retriever = common_app_vectorstore.as_retriever(
     }
 )
 
-student_retriever = student_vectorstore.as_retriever(
-    search_kwargs={
-        "k": 8,
-        "filter": {
-            "chunk_role": "experience"
-        }
+def create_student_retrievers(profile_name: str):
+    profile_filter = {
+        "$and": [
+            {"chunk_role": "experience"},
+            {"source": profile_name},
+        ]
     }
-)
-
-all_student_experience_retriever = student_vectorstore.as_retriever(
-    search_kwargs={
-        "k": 20,
-        "filter": {
-            "chunk_role": "experience"
-        }
-    }
-)
+    student_retriever = student_vectorstore.as_retriever(
+        search_kwargs={"k": 8, "filter": profile_filter}
+    )
+    all_student_experience_retriever = student_vectorstore.as_retriever(
+        search_kwargs={"k": 20, "filter": profile_filter}
+    )
+    return student_retriever, all_student_experience_retriever
 
 
 # ============================================================
@@ -689,6 +687,18 @@ def main():
     # --------------------------------------------------------
 
     language = choose_language()
+    try:
+        student_profile = choose_student_profile(
+            list_student_profiles(),
+            language,
+        )
+    except FileNotFoundError as exc:
+        print(f"\n{exc}")
+        return
+
+    student_retriever, all_student_experience_retriever = (
+        create_student_retrievers(student_profile.name)
+    )
     application_type = choose_mode(language)
 
     if application_type is None:
@@ -746,7 +756,7 @@ def main():
         system_prompt = COMMON_APP_SYSTEM_PROMPT + output_language_instruction(language)
 
         guidance_name = "Common App"
-        output_title = ("COMMON APP ESSAY PROMPT RECOMMENDATION" if language == "en" else "COMMON APP 主文书题目推荐")
+        output_title = ("COMMON APP ESSAY PROMPT RECOMMENDATION" if language == "en" else "Common App 主文书题目推荐")
 
     # --------------------------------------------------------
     # Retrieval

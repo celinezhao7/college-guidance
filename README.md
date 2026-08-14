@@ -121,12 +121,15 @@ The included Word documents are stored under `data/`:
 ```text
 data/
 ├── common_app_official/   Common App guidance
-├── student/               Student experiences
+├── student_profiles/      Selectable student profiles
 └── uc_official/           UC guidance
 ```
 
-To use different student evidence, replace or edit the `.docx` files under
-`data/student/`. Separate entries with:
+Put each student's evidence in a separate `.docx` file under
+`data/student_profiles/`. Run `python src\build_index.py` to index all profiles.
+When you run `python src\recommend.py`, select one student by number. Only that
+student's evidence is retrieved for the selected recommendation feature.
+Separate entries inside each profile with:
 
 ```text
 @@@
@@ -186,7 +189,7 @@ Fields of study can be entered in Chinese or English.
 college-guidance/
 ├── data/                  Source Word documents
 ├── src/
-│   ├── build_index.py     Build local Chroma indexes
+│   ├── build_index.py     Build local Chroma indexes for all profiles
 │   ├── college_major.py   College filtering and field matching
 │   ├── i18n.py            English and Chinese interface text
 │   └── recommend.py       Application entry point
@@ -201,7 +204,7 @@ college-guidance/
   Education;
 - official UC guidance under `data/uc_official/`;
 - official Common App guidance under `data/common_app_official/`;
-- user-provided student evidence under `data/student/`.
+- the selected student profile under `data/student_profiles/`.
 
 Always verify current majors, requirements, deadlines, costs, accreditation, and
 financial aid on official university websites. External college rankings are not
@@ -311,11 +314,14 @@ python src\recommend.py
 ```text
 data/
 ├── common_app_official/   Common App 官方指导
-├── student/               学生经历
+├── student_profiles/      可选择的学生档案
 └── uc_official/           UC 官方指导
 ```
 
-如需使用其他学生资料，请替换或修改 `data/student/` 中的 `.docx` 文件。不同经历之间使用以下符号分隔：
+请将每名学生的资料分别保存为独立的 `.docx` 文件，并统一放入 `data/student_profiles/`。
+运行 `python src\build_index.py` 会为所有档案建立索引；运行 `python src\recommend.py`
+时再通过数字选择学生，后续功能只会检索该学生的资料。
+每份档案中的不同经历使用以下符号分隔：
 
 ```text
 @@@
@@ -362,7 +368,7 @@ College Scorecard 使用学校的英文官方名称。程序支持 `UC` 等常�
 college-guidance/
 ├── data/                  Word 源文档
 ├── src/
-│   ├── build_index.py     构建本地 Chroma 索引
+│   ├── build_index.py     为全部档案构建本地 Chroma 索引
 │   ├── college_major.py   大学筛选与专业领域匹配
 │   ├── i18n.py            中英文界面文本
 │   └── recommend.py       程序入口
@@ -376,6 +382,6 @@ college-guidance/
 - 美国教育部 [College Scorecard](https://collegescorecard.ed.gov/data/)；
 - `data/uc_official/` 中的 UC 官方指导；
 - `data/common_app_official/` 中的 Common App 官方指导；
-- `data/student/` 中由用户提供的学生经历。
+- `data/student_profiles/` 中当前选定的学生档案。
 
 请始终在大学官方网站核实最新专业、申请要求、截止日期、费用、认证和助学金信息。本项目不使用外部大学排名。
