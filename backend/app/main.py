@@ -1,18 +1,22 @@
 """College Guidance FastAPI entry point.
 
-This first API layer is intentionally read-only. It does not alter the existing
-CLI, student documents, Chroma indexes, or recommendation modules.
+Exposes API endpoints for system metadata, student profiles,
+recommendation modes, and streaming recommendation generation.
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 
-from .profile_service import list_profiles
+from src.recommend import is_student_profile_indexed, stream_recommendation
+
+from .profile_service import get_profile, list_profiles
 from .schemas import (
     HealthResponse,
     ModeResponse,
     ModesResponse,
     ProfileResponse,
     ProfilesResponse,
+    RecommendationRequest,
 )
 
 
@@ -67,4 +71,45 @@ def modes() -> ModesResponse:
                 title_zh="大学与专业领域匹配",
             ),
         ]
+    )
+
+
+@app.post("/api/recommend", tags=["recommendations"])
+def recommend(request: RecommendationRequest):
+    mode_map = {
+        "uc_piq": "uc",
+        "common_app": "common_app",
+    }
+
+    application_type = mode_map.get(request.mode)
+
+    if application_type is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported recommendation mode: {request.mode}",
+        )
+
+    profile = get_profile(request.profile_id)
+    if profile is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Student profile not found.",
+        )
+
+    if not is_student_profile_indexed(profile.filename):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This student profile is not present in the Chroma index. "
+                "Run 'python src/build_index.py' and try again."
+            ),
+        )
+
+    return StreamingResponse(
+        stream_recommendation(
+            profile_name=profile.filename,
+            application_type=application_type,
+            language=request.language,
+        ),
+        media_type="text/plain",
     )

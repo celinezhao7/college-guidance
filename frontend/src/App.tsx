@@ -1,31 +1,28 @@
 import { useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
-import { ScrollArea } from "@/components/ui/scroll-area"
 
-type Message = {
-  role: "user" | "assistant"
-  content: string
-}
+import { Sidebar } from "@/components/Sidebar"
+import { ChatComposer } from "@/components/ChatComposer"
+import { ChatMessage, type Message } from "@/components/ChatMessage"
+import { ScrollArea } from "@/components/ui/scroll-area"
 
 function App() {
   const [input, setInput] = useState("")
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "assistant",
-      content: "Hi — tell me what you're looking for in a college.",
-    },
-  ])
+  const [messages, setMessages] = useState<Message[]>([])
 
   function handleSend() {
-    if (!input.trim()) return
+    const trimmedInput = input.trim()
 
-    setMessages((prev) => [
-      ...prev,
-      { role: "user", content: input },
+    if (!trimmedInput) return
+
+    setMessages((previousMessages) => [
+      ...previousMessages,
+      {
+        role: "user",
+        content: trimmedInput,
+      },
       {
         role: "assistant",
-        content: "This is a temporary mock response. We'll connect FastAPI next.",
+        content: "This is a temporary mock response.",
       },
     ])
 
@@ -34,61 +31,55 @@ function App() {
 
   return (
     <div className="flex h-screen bg-[#f7f6f2] text-zinc-900">
-      <aside className="w-64 border-r border-zinc-200 bg-[#f0eee8] p-4">
-        <Button className="w-full justify-start" variant="outline">
-          + New chat
-        </Button>
-
-        <div className="mt-6 space-y-2 text-sm">
-          <button className="w-full rounded-lg px-3 py-2 text-left hover:bg-black/5">
-            College recommendations
-          </button>
-          <button className="w-full rounded-lg px-3 py-2 text-left hover:bg-black/5">
-            Major guidance
-          </button>
-        </div>
-      </aside>
+      <Sidebar />
 
       <main className="flex min-w-0 flex-1 flex-col">
-        <header className="border-b border-zinc-200 px-6 py-4">
-          <h1 className="text-sm font-medium">College Guidance</h1>
-        </header>
+        {messages.length === 0 ? (
+          <div className="flex flex-1 items-center justify-center px-6">
+            <div className="w-full max-w-3xl">
+              <div className="mb-8 text-center">
+                <h1 className="text-3xl font-medium tracking-tight">
+                  How can I help you today?
+                </h1>
 
-        <ScrollArea className="flex-1">
-          <div className="mx-auto w-full max-w-3xl px-6 py-10">
-            <div className="space-y-8">
-              {messages.map((message, index) => (
-                <div
-                  key={index}
-                  className={
-                    message.role === "user"
-                      ? "ml-auto max-w-xl rounded-2xl bg-white px-4 py-3 shadow-sm"
-                      : "max-w-2xl"
-                  }
-                >
-                  <p className="whitespace-pre-wrap leading-7">
-                    {message.content}
-                  </p>
-                </div>
-              ))}
+                <p className="mt-2 text-sm text-zinc-500">
+                  Ask about colleges, majors, or your application.
+                </p>
+              </div>
+
+              <ChatComposer
+                input={input}
+                setInput={setInput}
+                onSend={handleSend}
+              />
             </div>
           </div>
-        </ScrollArea>
+        ) : (
+          <>
+            <ScrollArea className="flex-1">
+              <div className="mx-auto w-full max-w-3xl px-6 py-10">
+                <div className="space-y-8">
+                  {messages.map((message, index) => (
+                    <ChatMessage
+                      key={index}
+                      message={message}
+                    />
+                  ))}
+                </div>
+              </div>
+            </ScrollArea>
 
-        <div className="border-t border-zinc-200 bg-[#f7f6f2] px-6 py-5">
-          <div className="mx-auto flex max-w-3xl items-end gap-3 rounded-2xl border border-zinc-300 bg-white p-3 shadow-sm">
-            <Textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask about colleges, majors, or your application..."
-              className="min-h-[48px] resize-none border-0 shadow-none focus-visible:ring-0"
-            />
-
-            <Button onClick={handleSend} disabled={!input.trim()}>
-              Send
-            </Button>
-          </div>
-        </div>
+            <div className="px-6 pb-6">
+              <div className="mx-auto w-full max-w-3xl">
+                <ChatComposer
+                  input={input}
+                  setInput={setInput}
+                  onSend={handleSend}
+                />
+              </div>
+            </div>
+          </>
+        )}
       </main>
     </div>
   )

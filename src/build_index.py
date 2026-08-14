@@ -9,7 +9,10 @@ from langchain_core.documents import Document
 from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
 
-from student_profiles import get_student_profile_dir, list_student_profiles
+if __package__:
+    from .student_profiles import get_student_profile_dir, list_student_profiles
+else:
+    from student_profiles import get_student_profile_dir, list_student_profiles
 
 
 load_dotenv()

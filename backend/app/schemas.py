@@ -25,3 +25,8 @@ class ModeResponse(BaseModel):
 
 class ModesResponse(BaseModel):
     modes: list[ModeResponse]
+
+class RecommendationRequest(BaseModel):
+    profile_id: str
+    mode: str
+    language: str = "en"

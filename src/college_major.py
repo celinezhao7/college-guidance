@@ -8,7 +8,10 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
-from i18n import output_language_instruction
+if __package__:
+    from .i18n import output_language_instruction
+else:
+    from i18n import output_language_instruction
 
 
 SCORECARD_URL = "https://api.data.gov/ed/collegescorecard/v1/schools.json"

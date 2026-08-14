@@ -6,9 +6,14 @@ from dotenv import load_dotenv
 from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 
-from college_major import run_college_major_matching
-from i18n import choose_language, output_language_instruction, tr
-from student_profiles import choose_student_profile, list_student_profiles
+if __package__:
+    from .college_major import run_college_major_matching
+    from .i18n import choose_language, output_language_instruction, tr
+    from .student_profiles import choose_student_profile, list_student_profiles
+else:
+    from college_major import run_college_major_matching
+    from i18n import choose_language, output_language_instruction, tr
+    from student_profiles import choose_student_profile, list_student_profiles
 
 
 load_dotenv()
@@ -95,6 +100,15 @@ def create_student_retrievers(profile_name: str):
         search_kwargs={"k": 20, "filter": profile_filter}
     )
     return student_retriever, all_student_experience_retriever
+
+
+def is_student_profile_indexed(profile_name: str) -> bool:
+    result = student_vectorstore.get(
+        where={"source": profile_name},
+        limit=1,
+        include=["metadatas"],
+    )
+    return bool(result.get("ids"))
 
 
 # ============================================================
@@ -675,6 +689,79 @@ def choose_mode(language="en"):
 
     return None
 
+def stream_recommendation(
+    profile_name: str,
+    application_type: str,
+    language: str = "en",
+):
+    student_retriever, _ = create_student_retrievers(profile_name)
+
+    llm = ChatOpenAI(
+        model=os.getenv("QWEN_MODEL", "qwen3.5-plus"),
+        api_key=os.getenv("DASHSCOPE_API_KEY"),
+        base_url=os.getenv("DASHSCOPE_BASE_URL"),
+        temperature=0.2,
+    )
+
+    if application_type == "uc":
+        guidance_retriever = uc_retriever
+        guidance_query = UC_QUERY
+        system_prompt = UC_SYSTEM_PROMPT + output_language_instruction(language)
+
+    elif application_type == "common_app":
+        guidance_retriever = common_app_retriever
+        guidance_query = COMMON_APP_QUERY
+        system_prompt = (
+            COMMON_APP_SYSTEM_PROMPT
+            + output_language_instruction(language)
+        )
+
+    else:
+        raise ValueError(f"Unsupported application type: {application_type}")
+
+    guidance_docs = guidance_retriever.invoke(guidance_query)
+
+    student_docs = deduplicate_documents(
+        student_retriever.invoke(STUDENT_QUERY)
+    )
+
+    guidance_context = format_documents(guidance_docs)
+    student_context = format_documents(student_docs)
+
+    if application_type == "uc":
+        user_prompt = f"""
+=== UC OFFICIAL GUIDANCE ===
+
+{guidance_context}
+
+=== STUDENT EVIDENCE ===
+
+{student_context}
+
+Recommend the 4 best-supported UC PIQs for this student.
+"""
+    else:
+        user_prompt = f"""
+=== COMMON APP OFFICIAL GUIDANCE ===
+
+{guidance_context}
+
+=== STUDENT EVIDENCE ===
+
+{student_context}
+
+Recommend the 3 best-supported Common App essay prompts
+for this student and identify the Best Overall Choice.
+"""
+
+    for chunk in llm.stream(
+        [
+            ("system", system_prompt),
+            ("user", user_prompt),
+        ]
+    ):
+        if chunk.content:
+            yield chunk.content
 
 # ============================================================
 # Main

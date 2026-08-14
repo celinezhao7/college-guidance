@@ -53,3 +53,10 @@ def list_profiles() -> list[StudentProfile]:
         )
         for path in paths
     ]
+
+
+def get_profile(profile_id: str) -> StudentProfile | None:
+    return next(
+        (profile for profile in list_profiles() if profile.id == profile_id),
+        None,
+    )
