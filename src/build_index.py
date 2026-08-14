@@ -21,7 +21,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 UC_DIR = BASE_DIR / "data" / "uc_official"
 COMMON_APP_DIR = BASE_DIR / "data" / "common_app_official"
-STUDENT_DIR = BASE_DIR / "data" / "student"
+
+student_data_setting = os.getenv("STUDENT_DATA_DIR", "data/student")
+STUDENT_DIR = Path(student_data_setting)
+if not STUDENT_DIR.is_absolute():
+    STUDENT_DIR = BASE_DIR / STUDENT_DIR
 
 UC_DB_DIR = BASE_DIR / "chroma" / "uc"
 COMMON_APP_DB_DIR = BASE_DIR / "chroma" / "common_app"
