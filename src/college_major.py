@@ -1322,7 +1322,10 @@ def stream_college_recommendations(
     colleges = filter_by_size(colleges, preferences["size"])
     colleges = filter_by_selectivity(colleges, preferences["competition"])
     colleges = filter_by_max_cost(colleges, preferences["max_cost"])
-    candidate_limit = min(60, max(30, requested_count * 3))
+    # Rank broadly, but fetch the large Scorecard CIP payload in small batches.
+    # Most requests find enough supported schools in the first batch, avoiding
+    # the previous unconditional 30-school programs response.
+    candidate_limit = min(36, max(18, requested_count * 6))
     candidates = rank_colleges(colleges, preferences, candidate_limit)
 
     def verify(candidate_schools: list[dict]) -> list[dict]:
@@ -1342,7 +1345,14 @@ def stream_college_recommendations(
                 )
         return verified
 
-    verified_candidates = verify(candidates)
+    verified_candidates = []
+    verification_batch_size = max(8, requested_count * 2)
+    for start in range(0, len(candidates), verification_batch_size):
+        verified_candidates.extend(
+            verify(candidates[start : start + verification_batch_size])
+        )
+        if len(verified_candidates) >= requested_count:
+            break
 
     final_count = min(requested_count, len(verified_candidates))
     if final_count == 0:
