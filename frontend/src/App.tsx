@@ -159,6 +159,7 @@ function App() {
             language,
             query: message,
             collegePreferences: response.preferences,
+            collegeScenario: response.scenario,
           },
           (chunk) => {
             setMessages((previous) =>
@@ -316,6 +317,9 @@ function PreferenceSummary({ preferences, answered, language }: { preferences: C
     size: preferences.size[0],
     competition: preferences.competition[0],
     sat: preferences.sat ? `SAT ${preferences.sat}` : (language === "zh" ? "未提供 SAT" : "SAT skipped"),
+    act: preferences.act ? `ACT ${preferences.act}` : (language === "zh" ? "未提供 ACT" : "ACT skipped"),
+    ownership: preferences.ownership[0],
+    institution_format: preferences.institution_format[0],
     targets: preferences.targets,
     count: language === "zh" ? `${preferences.count} 所学校` : `${preferences.count} schools`,
   }

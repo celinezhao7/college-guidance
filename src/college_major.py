@@ -297,6 +297,62 @@ Recommend school-specific fields of study supported by both evidence sets."""
     stream_response(llm, SCHOOL_MAJOR_SYSTEM_PROMPT + output_language_instruction(language), prompt)
 
 
+def stream_majors_at_target_colleges(
+    llm,
+    student_context: str,
+    targets: str,
+    language="en",
+):
+    """Non-interactive web version of the terminal college-first branch."""
+    catalog = load_school_catalog()
+    preferred_states: set[str] = set()
+    matched_schools = []
+    for raw_target in (item.strip() for item in targets.split(",") if item.strip()):
+        if normalize_school_name(raw_target) in UC_SYSTEM_ALIASES:
+            matched_schools.extend(
+                school for school in catalog
+                if normalize_school_name(school["school.name"]).startswith("university of california ")
+            )
+            continue
+        candidates = search_school_candidates(raw_target, preferred_states)
+        if candidates and candidates[0]["_match_score"] >= 0.55:
+            matched_schools.append(candidates[0])
+
+    unique_schools = {school["id"]: school for school in matched_schools}
+    if not unique_schools:
+        yield (
+            "没有找到与你输入名称相符的 College Scorecard 大学。请尝试使用学校的英文官方名称。"
+            if language == "zh"
+            else "No College Scorecard school matched that name. Try the school's official English name."
+        )
+        return
+
+    fields_by_school = fetch_bachelors_fields_cached(list(unique_schools))
+    records = [
+        {
+            "school": school["school.name"],
+            "state": school["school.state"],
+            "bachelors_fields": fields_by_school.get(school["id"], []),
+        }
+        for school in unique_schools.values()
+    ]
+    prompt = f"""=== DOCUMENTED STUDENT EVIDENCE ===
+{student_context}
+
+=== VERIFIED COLLEGE SCORECARD BACHELOR'S FIELDS ===
+{json.dumps(records, ensure_ascii=False, indent=2)}
+
+Recommend school-specific fields of study supported by both evidence sets."""
+    for chunk in llm.stream(
+        [
+            ("system", SCHOOL_MAJOR_SYSTEM_PROMPT + output_language_instruction(language)),
+            ("user", prompt),
+        ]
+    ):
+        if chunk.content:
+            yield chunk.content
+
+
 def _number(value: str):
     try:
         return float(value.replace(",", "").strip())

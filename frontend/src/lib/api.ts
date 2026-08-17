@@ -55,6 +55,7 @@ export async function streamRecommendation(
     language: "en" | "zh"
     query: string
     collegePreferences?: CollegePreferences
+    collegeScenario?: string | null
   },
   onChunk: (text: string) => void,
 ) {
@@ -67,6 +68,7 @@ export async function streamRecommendation(
       language: request.language,
       query: request.query,
       college_preferences: request.collegePreferences,
+      college_scenario: request.collegeScenario,
     }),
   })
 
@@ -120,5 +122,6 @@ export async function continueCollegeConversation(request: {
     ready: boolean
     preferences: CollegePreferences
     answered: string[]
+    scenario: string | null
   }>
 }

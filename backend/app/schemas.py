@@ -32,6 +32,7 @@ class RecommendationRequest(BaseModel):
     language: str = "en"
     query: str = ""
     college_preferences: "CollegePreferences | None" = None
+    college_scenario: str | None = None
 
 
 class CollegePreferences(BaseModel):
@@ -61,3 +62,4 @@ class ChatResponse(BaseModel):
     ready: bool
     preferences: CollegePreferences
     answered: list[str]
+    scenario: str | None = None

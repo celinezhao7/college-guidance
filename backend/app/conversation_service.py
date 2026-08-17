@@ -5,35 +5,52 @@ import re
 from uuid import uuid4
 
 
-QUESTION_ORDER = [
+MAJOR_FIRST_QUESTIONS = [
     "field",
+    "sat",
+    "act",
     "states",
     "max_cost",
     "size",
+    "ownership",
+    "institution_format",
     "competition",
-    "sat",
     "targets",
     "count",
 ]
 
+QUESTION_ORDERS = {
+    "college_first": ["targets"],
+    "major_first": MAJOR_FIRST_QUESTIONS,
+    "explore": [],
+}
+
 QUESTIONS = {
     "en": {
+        "scenario": "Where would you like to start? 1) I know my target college but not the field, 2) I know my field but not the college, or 3) I’m unsure about both.",
         "field": "What field of study are you interested in?",
         "states": "Which states do you prefer? Use abbreviations such as CA or WA, or say “any.”",
         "max_cost": "What is your maximum annual cost before aid? You can also say “no limit.”",
         "size": "Do you prefer a small, medium, or large school—or any size?",
         "competition": "What institutional selectivity do you prefer: lower, medium, higher, or any? This is based on the school’s overall admission rate, not your personal admission chance.",
         "sat": "What is your SAT score? You can say “skip.” It is context only, not an admission prediction.",
+        "act": "What is your ACT score? You can say “skip.” It is context only, not an admission prediction.",
+        "ownership": "Do you prefer public, private nonprofit, private for-profit, or any ownership type?",
+        "institution_format": "Do you prefer a university, a liberal arts college, or either?",
         "targets": "Do you have any target schools or university systems? You can say “none.”",
         "count": "How many colleges would you like me to recommend (1–20)?",
     },
     "zh": {
+        "scenario": "你想从哪里开始？1）有目标大学，但不确定专业；2）有目标专业，但不确定大学；3）大学和专业都不确定。",
         "field": "你对哪个专业领域感兴趣？",
         "states": "你偏好哪些州？请输入 CA、WA 等缩写，也可以回答“不限”。",
         "max_cost": "你能接受的助学金前最高年度费用是多少？也可以回答“不限”。",
         "size": "你偏好小型、中型还是大型学校？也可以回答“不限”。",
         "competition": "你偏好的学校竞争程度是较低、中等、较高还是不限？这里依据学校整体录取率，不代表个人录取概率。",
         "sat": "你的 SAT 分数是多少？可以回答“跳过”。该分数仅作为背景信息，不用于预测录取。",
+        "act": "你的 ACT 分数是多少？可以回答“跳过”。该分数仅作为背景信息，不用于预测录取。",
+        "ownership": "你偏好公立、私立非营利、私立营利，还是不限学校性质？",
+        "institution_format": "你偏好综合性大学、文理学院，还是两者都可以？",
         "targets": "你有目标大学或大学系统吗？没有可以回答“无”。",
         "count": "你希望推荐几所大学（1–20）？",
     },
@@ -80,6 +97,7 @@ class Conversation:
     answered: set[str] = field(default_factory=set)
     awaiting: str | None = None
     proposed_field: str | None = None
+    scenario: str | None = None
 
 
 _conversations: dict[str, Conversation] = {}
@@ -205,6 +223,39 @@ def _parse(answer_for: str, message: str, preferences: dict) -> bool:
             if number is None or not 400 <= number <= 1600:
                 return False
             preferences["sat"] = int(number)
+    elif answer_for == "act":
+        if _is_skip(value):
+            preferences["act"] = None
+        else:
+            number = _number(value)
+            if number is None or not 1 <= number <= 36:
+                return False
+            preferences["act"] = int(number)
+    elif answer_for == "ownership":
+        mapping = {
+            "public": "public", "公立": "public",
+            "private nonprofit": "private_nonprofit", "nonprofit": "private_nonprofit", "私立非营利": "private_nonprofit",
+            "private for profit": "private_for_profit", "for profit": "private_for_profit", "私立营利": "private_for_profit",
+        }
+        if _is_skip(value):
+            preferences["ownership"] = ["any"]
+        else:
+            selected = next((result for key, result in mapping.items() if key in lowered), None)
+            if not selected:
+                return False
+            preferences["ownership"] = [selected]
+    elif answer_for == "institution_format":
+        mapping = {
+            "university": "university", "大学": "university", "综合性": "university",
+            "liberal arts": "liberal_arts", "文理学院": "liberal_arts",
+        }
+        if _is_skip(value):
+            preferences["institution_format"] = ["either"]
+        else:
+            selected = next((result for key, result in mapping.items() if key in lowered), None)
+            if not selected:
+                return False
+            preferences["institution_format"] = [selected]
     elif answer_for == "targets":
         preferences["targets"] = (
             "无特定目标" if _is_skip(value) and preferences.get("language") == "zh"
@@ -220,7 +271,21 @@ def _parse(answer_for: str, message: str, preferences: dict) -> bool:
 
 
 def _next_question(conversation: Conversation) -> str | None:
-    return next((key for key in QUESTION_ORDER if key not in conversation.answered), None)
+    if conversation.scenario is None:
+        return "scenario"
+    order = QUESTION_ORDERS[conversation.scenario]
+    return next((key for key in order if key not in conversation.answered), None)
+
+
+def _parse_scenario(message: str) -> str | None:
+    value = message.strip().lower()
+    if value == "1" or any(phrase in value for phrase in ("know college", "target college", "有目标大学", "知道大学")):
+        return "college_first"
+    if value == "2" or any(phrase in value for phrase in ("know major", "know field", "target major", "target field", "有目标专业", "知道专业")):
+        return "major_first"
+    if value == "3" or any(phrase in value for phrase in ("unsure about both", "don t know either", "don't know either", "都不确定", "都不知道")):
+        return "explore"
+    return None
 
 
 def _acknowledgement(language: str) -> str:
@@ -301,7 +366,18 @@ def chat(
     conversation.language = language if language in QUESTIONS else "en"
     conversation.preferences["language"] = conversation.language
 
-    if conversation.awaiting == "field_confirmation":
+    if conversation.awaiting == "scenario":
+        scenario = _parse_scenario(message)
+        if scenario is None:
+            return _response(
+                conversation,
+                ("I couldn’t determine the starting point. " if conversation.language == "en" else "我没有判断出你的起点。")
+                + QUESTIONS[conversation.language]["scenario"],
+            )
+        conversation.scenario = scenario
+        conversation.answered.add("scenario")
+        acknowledgement = _acknowledgement(conversation.language)
+    elif conversation.awaiting == "field_confirmation":
         if _is_yes(message):
             conversation.preferences["field"] = conversation.proposed_field
             conversation.answered.add("field")
@@ -337,20 +413,10 @@ def chat(
         conversation.answered.add(conversation.awaiting)
         acknowledgement = _acknowledgement(conversation.language)
     elif message.strip():
-        # Treat a specific first message as a field when it is not merely a help request.
-        inferred_field = _infer_field(message)
-        if inferred_field:
-            conversation.preferences["field"] = inferred_field
-            conversation.answered.add("field")
-        else:
-            proposed_field = _ambiguous_field(message)
-            if proposed_field:
-                conversation.proposed_field = proposed_field
-                conversation.awaiting = "field_confirmation"
-                return _response(
-                    conversation,
-                    _field_confirmation(conversation.language, proposed_field),
-                )
+        scenario = _parse_scenario(message)
+        if scenario:
+            conversation.scenario = scenario
+            conversation.answered.add("scenario")
         acknowledgement = (
             "I can help with that. " if conversation.language == "en" else "可以，我来帮你。"
         )
@@ -380,5 +446,6 @@ def _response(conversation: Conversation, reply: str, ready: bool = False) -> di
         "reply": reply,
         "ready": ready,
         "preferences": preferences,
-        "answered": [key for key in QUESTION_ORDER if key in conversation.answered],
+        "answered": [key for key in MAJOR_FIRST_QUESTIONS if key in conversation.answered],
+        "scenario": conversation.scenario,
     }

@@ -120,6 +120,7 @@ def recommend(request: RecommendationRequest):
                 if request.college_preferences
                 else None
             ),
+            college_scenario=request.college_scenario,
         ),
         media_type="text/plain",
     )

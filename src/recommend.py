@@ -12,6 +12,7 @@ if __package__:
         MAJOR_SYSTEM_PROMPT,
         run_college_major_matching,
         stream_college_recommendations,
+        stream_majors_at_target_colleges,
     )
     from .i18n import choose_language, output_language_instruction, tr
     from .student_profiles import choose_student_profile, list_student_profiles
@@ -20,6 +21,7 @@ else:
         MAJOR_SYSTEM_PROMPT,
         run_college_major_matching,
         stream_college_recommendations,
+        stream_majors_at_target_colleges,
     )
     from i18n import choose_language, output_language_instruction, tr
     from student_profiles import choose_student_profile, list_student_profiles
@@ -712,6 +714,7 @@ def stream_recommendation(
     language: str = "en",
     query: str = "",
     college_preferences: dict | None = None,
+    college_scenario: str | None = None,
 ):
     student_retriever, all_student_experience_retriever = (
         create_student_retrievers(profile_name)
@@ -726,7 +729,15 @@ def stream_recommendation(
 
     if application_type == "college_major":
         student_context = get_all_student_context(profile_name)
-        if college_preferences:
+        if college_scenario == "college_first" and college_preferences:
+            yield from stream_majors_at_target_colleges(
+                llm,
+                student_context,
+                college_preferences.get("targets", ""),
+                language,
+            )
+            return
+        if college_scenario == "major_first" and college_preferences:
             yield from stream_college_recommendations(
                 llm,
                 student_context,
