@@ -5,10 +5,9 @@ web service. It is intended for a limited demo, not a production launch.
 
 ## Privacy boundary
 
-The Docker image includes the read-only UC and Common App guidance indexes, but
-explicitly excludes `chroma/student`. Never publish local student-profile vectors.
-Profiles created in the demo live only in the running container's ephemeral
-filesystem and disappear when the free service restarts.
+The Docker image includes the read-only UC and Common App guidance indexes plus
+three synthetic, de-identified demo student profiles and their student index.
+Never replace these demo files with real student records in a public deployment.
 
 Do not commit `.env`. Configure secrets in Render instead.
 
@@ -20,7 +19,8 @@ Do not commit `.env`. Configure secrets in Render instead.
    python src\build_index.py
    ```
 
-2. Confirm only `chroma/uc`, `chroma/common_app`, and
+2. Confirm `chroma/uc`, `chroma/common_app`, `chroma/student`, the three
+   synthetic files in `data/student_profiles`, and
    `data/scorecard_school_catalog.json` are included in the deployment commit.
 3. Run local checks:
 
@@ -51,7 +51,6 @@ Do not commit `.env`. Configure secrets in Render instead.
 - In-memory conversations reset after restarts and deployments.
 - Runtime caches reset after restarts.
 - The bundled UC and Common App Chroma indexes are read-only deployment data.
-- Student profiles created during a demo session are temporary and reset when
-  the service restarts or redeploys.
+- The bundled student profiles are synthetic demo data, not real records.
 
 Do not enable student uploads in this demo architecture.

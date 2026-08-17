@@ -34,9 +34,9 @@ def list_profiles() -> list[StudentProfile]:
         return []
 
     preferred_order = {
-        "学生信息知识库": 0,
-        "信息不足": 1,
-        "兴趣模糊": 2,
+        "完整学生档案": 0,
+        "信息不足学生档案": 1,
+        "兴趣模糊学生档案": 2,
     }
     paths = sorted(
         directory.glob("*.docx"),
