@@ -12,6 +12,8 @@ services:
         value: https://dashscope.aliyuncs.com/compatible-mode/v1
       - key: QWEN_MODEL
         value: qwen3.5-plus
+      - key: QWEN_MAX_TOKENS
+        value: "1400"
       - key: COLLEGE_SCORECARD_API_KEY
         sync: false
       - key: COLLEGE_GUIDANCE_DEBUG

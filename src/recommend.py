@@ -727,6 +727,7 @@ def stream_recommendation(
         api_key=os.getenv("DASHSCOPE_API_KEY"),
         base_url=os.getenv("DASHSCOPE_BASE_URL"),
         temperature=0.2,
+        max_tokens=int(os.getenv("QWEN_MAX_TOKENS", "1400")),
     )
 
     if application_type == "college_major":
@@ -854,6 +855,7 @@ def main():
         api_key=os.getenv("DASHSCOPE_API_KEY"),
         base_url=os.getenv("DASHSCOPE_BASE_URL"),
         temperature=0.2,
+        max_tokens=int(os.getenv("QWEN_MAX_TOKENS", "1400")),
     )
 
     if application_type == "college_major":
