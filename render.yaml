@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: college-guidance-demo
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: DASHSCOPE_API_KEY
+        sync: false
+      - key: DASHSCOPE_BASE_URL
+        value: https://dashscope.aliyuncs.com/compatible-mode/v1
+      - key: QWEN_MODEL
+        value: qwen3.5-plus
+      - key: COLLEGE_SCORECARD_API_KEY
+        sync: false
+      - key: COLLEGE_GUIDANCE_DEBUG
+        value: "false"
+      - key: COLLEGE_GUIDANCE_DEMO
+        value: "true"
