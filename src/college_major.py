@@ -10,6 +10,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
+from bs4 import BeautifulSoup
+
 if __package__:
     from .i18n import output_language_instruction
 else:
@@ -18,6 +20,7 @@ else:
 
 SCORECARD_URL = "https://api.data.gov/ed/collegescorecard/v1/schools.json"
 CATALOG_PATH = Path(__file__).resolve().parent.parent / "data" / "scorecard_school_catalog.json"
+CIP_2020_BROWSE_URL = "https://nces.ed.gov/ipeds/cipcode/browse.aspx?y=56"
 
 PROGRAM_FIELDS = {
     "computer": "latest.academics.program_percentage.computer",
@@ -101,6 +104,18 @@ the student should investigate while exploring specific majors within the field.
 Do not predict admission or career outcomes, and do not claim experience that is
 not documented. End with a short comparison of the top two fields and one concise
 next step telling the student to explore exact majors on university websites."""
+
+CIP_FIELD_SYSTEM_PROMPT = MAJOR_SYSTEM_PROMPT + """
+
+Official-classification rules:
+- Recommend only fields present in the supplied OFFICIAL NCES CIP 2020 FOUR-DIGIT FIELDS list.
+- Display each field's exact four-digit CIP code and exact title. Do not rename,
+  combine, broaden, embellish, or invent field titles.
+- Interdisciplinary connections may be discussed only in the explanation; they
+  must never replace the official field title.
+- These are federal classification categories, not confirmation that a specific
+  college offers a corresponding major.
+"""
 
 COLLEGE_SYSTEM_PROMPT = """You are a US undergraduate college recommendation
 assistant. Use only the supplied student profile, preferences, and College
@@ -209,7 +224,62 @@ interdisciplinary alternatives where the evidence supports them."""
     print("\n" + "=" * 60)
     print("专业领域探索建议" if language == "zh" else "FIELDS OF STUDY TO EXPLORE")
     print("=" * 60 + "\n")
-    stream_response(llm, MAJOR_SYSTEM_PROMPT + output_language_instruction(language), prompt)
+    cip_fields = load_official_cip_four_digit_fields()
+    prompt += f"""
+
+=== OFFICIAL NCES CIP 2020 FOUR-DIGIT FIELDS ===
+{json.dumps(cip_fields, ensure_ascii=False)}
+"""
+    stream_response(llm, CIP_FIELD_SYSTEM_PROMPT + output_language_instruction(language), prompt)
+
+
+@lru_cache(maxsize=1)
+def load_official_cip_four_digit_fields() -> list[dict[str, str]]:
+    """Load exact current four-digit titles from the official NCES CIP browser."""
+    try:
+        with urlopen(CIP_2020_BROWSE_URL, timeout=45) as response:
+            html = response.read()
+    except (HTTPError, URLError, TimeoutError) as exc:
+        raise RuntimeError(f"Could not load the official NCES CIP taxonomy: {exc}") from exc
+
+    soup = BeautifulSoup(html, "html.parser")
+    fields: dict[str, str] = {}
+    for link in soup.find_all("a"):
+        text = " ".join(link.get_text(" ", strip=True).split())
+        match = re.match(r"^(\d{2}\.\d{2})\)\s+(.+?)\.?$", text)
+        if not match:
+            continue
+        code, title = match.groups()
+        if title.lower() == "reserved":
+            continue
+        fields[code] = title
+    if not fields:
+        raise RuntimeError("The official NCES CIP taxonomy returned no four-digit fields.")
+    return [{"cip_code": code, "title": title} for code, title in sorted(fields.items())]
+
+
+def stream_official_cip_field_recommendations(
+    llm,
+    student_context: str,
+    language="en",
+):
+    cip_fields = load_official_cip_four_digit_fields()
+    prompt = f"""=== DOCUMENTED STUDENT EVIDENCE ===
+{student_context}
+
+=== OFFICIAL NCES CIP 2020 FOUR-DIGIT FIELDS ===
+{json.dumps(cip_fields, ensure_ascii=False)}
+
+Recommend five well-supported official fields to explore. Use only exact codes
+and titles from the supplied list."""
+    for chunk in llm.stream(
+        [
+            ("system", CIP_FIELD_SYSTEM_PROMPT + output_language_instruction(language)),
+            ("user", prompt),
+        ]
+    ):
+        if chunk.content:
+            yield chunk.content
 
 
 def fetch_bachelors_fields_for_schools(school_ids: list[int]) -> dict[int, list[dict]]:

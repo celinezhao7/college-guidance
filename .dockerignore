@@ -1,0 +1,16 @@
+.git
+.env
+.env.*
+!.env.example
+.venv
+.venv-old
+backend/.venv
+frontend/node_modules
+frontend/dist
+**/__pycache__
+**/*.pyc
+docs
+chroma/student
+chroma/student/**
+data/student_profiles
+data/student_profiles/**

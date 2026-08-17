@@ -233,6 +233,11 @@ function App() {
       />
 
       <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-xs text-amber-900">
+          {zh
+            ? "演示版本：请勿输入真实姓名、联系方式或其他敏感个人信息。对话可能在服务器重启后重置。"
+            : "Demo version: do not enter real names, contact details, or other sensitive personal information. Chats may reset when the server restarts."}
+        </div>
         {messages.length === 0 ? (
           <div className="flex flex-1 items-center justify-center px-6">
             <div className="w-full max-w-3xl">

@@ -13,6 +13,7 @@ if __package__:
         run_college_major_matching,
         stream_college_recommendations,
         stream_majors_at_target_colleges,
+        stream_official_cip_field_recommendations,
     )
     from .i18n import choose_language, output_language_instruction, tr
     from .student_profiles import choose_student_profile, list_student_profiles
@@ -22,6 +23,7 @@ else:
         run_college_major_matching,
         stream_college_recommendations,
         stream_majors_at_target_colleges,
+        stream_official_cip_field_recommendations,
     )
     from i18n import choose_language, output_language_instruction, tr
     from student_profiles import choose_student_profile, list_student_profiles
@@ -745,32 +747,11 @@ def stream_recommendation(
                 language,
             )
             return
-        user_request = query.strip() or (
-            "Recommend fields of study for me to explore based on my documented evidence."
+        yield from stream_official_cip_field_recommendations(
+            llm,
+            student_context,
+            language,
         )
-        user_prompt = f"""
-=== DOCUMENTED STUDENT EVIDENCE ===
-
-{student_context}
-
-=== STUDENT REQUEST ===
-
-{user_request}
-
-Recommend five well-supported undergraduate fields to explore. Include related or
-interdisciplinary alternatives where the evidence supports them.
-"""
-        for chunk in llm.stream(
-            [
-                (
-                    "system",
-                    MAJOR_SYSTEM_PROMPT + output_language_instruction(language),
-                ),
-                ("user", user_prompt),
-            ]
-        ):
-            if chunk.content:
-                yield chunk.content
         return
 
     if application_type == "uc":

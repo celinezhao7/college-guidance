@@ -292,6 +292,16 @@ def _acknowledgement(language: str) -> str:
     return "Got it. " if language == "en" else "好的。"
 
 
+def _question(conversation: Conversation, key: str) -> str:
+    if key == "targets" and conversation.scenario == "college_first":
+        return (
+            "Which target college or university system would you like to explore? Please use its official English name or a common abbreviation such as UC or UMich."
+            if conversation.language == "en"
+            else "你想探索哪所目标大学或大学系统？请使用英文官方名称或 UC、UMich 等常用缩写。"
+        )
+    return QUESTIONS[conversation.language][key]
+
+
 def _infer_field(message: str) -> str | None:
     lowered = message.lower()
     fields = {
@@ -398,6 +408,19 @@ def chat(
                 _field_confirmation(conversation.language, conversation.proposed_field or "Computer Science"),
             )
     elif conversation.awaiting:
+        if (
+            conversation.awaiting == "targets"
+            and conversation.scenario == "college_first"
+            and _is_skip(message)
+        ):
+            conversation.scenario = "explore"
+            conversation.awaiting = None
+            reply = (
+                "No problem. Since you don’t have a target college yet, I’ll recommend fields of study to explore based on your documented experiences."
+                if conversation.language == "en"
+                else "没问题。既然你目前没有目标大学，我会根据你记录的经历推荐值得探索的专业领域。"
+            )
+            return _response(conversation, reply, ready=True)
         if conversation.awaiting == "field":
             proposed_field = _ambiguous_field(message)
             if proposed_field:
@@ -409,7 +432,7 @@ def chat(
                 )
         if not _parse(conversation.awaiting, message, conversation.preferences):
             prefix = "I couldn’t understand that. " if conversation.language == "en" else "我没有理解这个回答。"
-            return _response(conversation, prefix + QUESTIONS[conversation.language][conversation.awaiting])
+            return _response(conversation, prefix + _question(conversation, conversation.awaiting))
         conversation.answered.add(conversation.awaiting)
         acknowledgement = _acknowledgement(conversation.language)
     elif message.strip():
@@ -427,14 +450,22 @@ def chat(
     if conversation.awaiting:
         return _response(
             conversation,
-            acknowledgement + QUESTIONS[conversation.language][conversation.awaiting],
+            acknowledgement + _question(conversation, conversation.awaiting),
         )
 
-    ready_message = (
-        "Thanks—I have enough information. I’ll generate your college recommendations now."
-        if conversation.language == "en"
-        else "谢谢，我已经获得足够的信息。现在为你生成大学推荐。"
-    )
+    ready_messages = {
+        "en": {
+            "college_first": "Thanks—I’ll now explore fields of study reported by your target college that fit your documented experiences.",
+            "major_first": "Thanks—I have enough information. I’ll generate your college recommendations now.",
+            "explore": "Thanks—I’ll recommend fields of study to explore based on your documented experiences.",
+        },
+        "zh": {
+            "college_first": "谢谢。现在根据你的经历，探索目标大学所报告的相关专业领域。",
+            "major_first": "谢谢，我已经获得足够的信息。现在为你生成大学推荐。",
+            "explore": "谢谢。现在根据你记录的经历，推荐值得探索的专业领域。",
+        },
+    }
+    ready_message = ready_messages[conversation.language][conversation.scenario]
     return _response(conversation, ready_message, ready=True)
 
 

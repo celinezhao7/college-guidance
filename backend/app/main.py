@@ -6,6 +6,8 @@ recommendation modes, and streaming recommendation generation.
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 
 from src.recommend import is_student_profile_indexed, stream_recommendation
 
@@ -23,20 +25,14 @@ from .schemas import (
 )
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+FRONTEND_DIST = PROJECT_ROOT / "frontend" / "dist"
+
 app = FastAPI(
     title="College Guidance API",
     summary="Backend API for the College Guidance project",
     version="0.1.0",
 )
-
-
-@app.get("/", include_in_schema=False)
-def root() -> dict[str, str]:
-    return {
-        "service": "College Guidance API",
-        "version": app.version,
-        "documentation": "/docs",
-    }
 
 
 @app.get("/api/health", response_model=HealthResponse, tags=["system"])
@@ -138,3 +134,19 @@ def chat(request: ChatRequest) -> ChatResponse:
             message=request.message,
         )
     )
+
+
+if FRONTEND_DIST.is_dir():
+    app.mount(
+        "/",
+        StaticFiles(directory=FRONTEND_DIST, html=True),
+        name="frontend",
+    )
+else:
+    @app.get("/", include_in_schema=False)
+    def root() -> dict[str, str]:
+        return {
+            "service": "College Guidance API",
+            "version": app.version,
+            "documentation": "/docs",
+        }
