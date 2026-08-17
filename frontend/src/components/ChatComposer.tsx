@@ -7,19 +7,32 @@ type ChatComposerProps = {
   input: string
   setInput: (value: string) => void
   onSend: () => void
+  disabled?: boolean
+  requireInput?: boolean
+  placeholder?: string
 }
 
 export function ChatComposer({
   input,
   setInput,
   onSend,
+  disabled = false,
+  requireInput = true,
+  placeholder = "Ask about colleges, majors, or your application...",
 }: ChatComposerProps) {
   return (
     <div className="w-full rounded-3xl border border-zinc-300 bg-white p-3 shadow-sm">
       <Textarea
         value={input}
         onChange={(event) => setInput(event.target.value)}
-        placeholder="Ask about colleges, majors, or your application..."
+        placeholder={placeholder}
+        disabled={disabled}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault()
+            onSend()
+          }
+        }}
         className="min-h-[60px] resize-none border-0 bg-transparent px-1 shadow-none focus-visible:ring-0"
       />
 
@@ -27,7 +40,7 @@ export function ChatComposer({
         <Button
           size="icon"
           onClick={onSend}
-          disabled={!input.trim()}
+          disabled={disabled || (requireInput && !input.trim())}
           className="h-9 w-9 rounded-full"
         >
           <ArrowUp className="h-4 w-4" />

@@ -1,5 +1,6 @@
 import os
 import time
+from functools import lru_cache
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -7,11 +8,19 @@ from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 
 if __package__:
-    from .college_major import run_college_major_matching
+    from .college_major import (
+        MAJOR_SYSTEM_PROMPT,
+        run_college_major_matching,
+        stream_college_recommendations,
+    )
     from .i18n import choose_language, output_language_instruction, tr
     from .student_profiles import choose_student_profile, list_student_profiles
 else:
-    from college_major import run_college_major_matching
+    from college_major import (
+        MAJOR_SYSTEM_PROMPT,
+        run_college_major_matching,
+        stream_college_recommendations,
+    )
     from i18n import choose_language, output_language_instruction, tr
     from student_profiles import choose_student_profile, list_student_profiles
 
@@ -100,6 +109,14 @@ def create_student_retrievers(profile_name: str):
         search_kwargs={"k": 20, "filter": profile_filter}
     )
     return student_retriever, all_student_experience_retriever
+
+
+@lru_cache(maxsize=32)
+def get_all_student_context(profile_name: str) -> str:
+    """Cache unchanged profile retrieval to avoid repeated embedding API calls."""
+    _, retriever = create_student_retrievers(profile_name)
+    documents = deduplicate_documents(retriever.invoke(STUDENT_QUERY))
+    return format_documents(documents)
 
 
 def is_student_profile_indexed(profile_name: str) -> bool:
@@ -693,8 +710,12 @@ def stream_recommendation(
     profile_name: str,
     application_type: str,
     language: str = "en",
+    query: str = "",
+    college_preferences: dict | None = None,
 ):
-    student_retriever, _ = create_student_retrievers(profile_name)
+    student_retriever, all_student_experience_retriever = (
+        create_student_retrievers(profile_name)
+    )
 
     llm = ChatOpenAI(
         model=os.getenv("QWEN_MODEL", "qwen3.5-plus"),
@@ -702,6 +723,44 @@ def stream_recommendation(
         base_url=os.getenv("DASHSCOPE_BASE_URL"),
         temperature=0.2,
     )
+
+    if application_type == "college_major":
+        student_context = get_all_student_context(profile_name)
+        if college_preferences:
+            yield from stream_college_recommendations(
+                llm,
+                student_context,
+                college_preferences,
+                language,
+            )
+            return
+        user_request = query.strip() or (
+            "Recommend fields of study for me to explore based on my documented evidence."
+        )
+        user_prompt = f"""
+=== DOCUMENTED STUDENT EVIDENCE ===
+
+{student_context}
+
+=== STUDENT REQUEST ===
+
+{user_request}
+
+Recommend five well-supported undergraduate fields to explore. Include related or
+interdisciplinary alternatives where the evidence supports them.
+"""
+        for chunk in llm.stream(
+            [
+                (
+                    "system",
+                    MAJOR_SYSTEM_PROMPT + output_language_instruction(language),
+                ),
+                ("user", user_prompt),
+            ]
+        ):
+            if chunk.content:
+                yield chunk.content
+        return
 
     if application_type == "uc":
         guidance_retriever = uc_retriever

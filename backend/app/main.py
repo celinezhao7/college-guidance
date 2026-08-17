@@ -10,7 +10,10 @@ from fastapi.responses import StreamingResponse
 from src.recommend import is_student_profile_indexed, stream_recommendation
 
 from .profile_service import get_profile, list_profiles
+from .conversation_service import chat as continue_conversation
 from .schemas import (
+    ChatRequest,
+    ChatResponse,
     HealthResponse,
     ModeResponse,
     ModesResponse,
@@ -79,6 +82,7 @@ def recommend(request: RecommendationRequest):
     mode_map = {
         "uc_piq": "uc",
         "common_app": "common_app",
+        "college_field": "college_major",
     }
 
     application_type = mode_map.get(request.mode)
@@ -110,6 +114,26 @@ def recommend(request: RecommendationRequest):
             profile_name=profile.filename,
             application_type=application_type,
             language=request.language,
+            query=request.query,
+            college_preferences=(
+                request.college_preferences.model_dump()
+                if request.college_preferences
+                else None
+            ),
         ),
         media_type="text/plain",
+    )
+
+
+@app.post("/api/chat", response_model=ChatResponse, tags=["chat"])
+def chat(request: ChatRequest) -> ChatResponse:
+    if get_profile(request.profile_id) is None:
+        raise HTTPException(status_code=404, detail="Student profile not found.")
+    return ChatResponse.model_validate(
+        continue_conversation(
+            session_id=request.session_id,
+            profile_id=request.profile_id,
+            language=request.language,
+            message=request.message,
+        )
     )

@@ -1,7 +1,9 @@
 import json
 import os
 import re
+import time
 from difflib import SequenceMatcher
+from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
 from urllib.error import HTTPError, URLError
@@ -139,13 +141,17 @@ Create a concise, user-facing report rather than a database audit.
   details. In particular, never output text such as [latest.*],
   [matching_bachelors_fields.*], or any similar source-field annotation. Show only
   the human-readable reported field title.
+- Address the user directly as "you" in English or "你" in Chinese. Never refer
+  to the user as "the student," and never output an instruction such as "tell the
+  student."
 - Avoid repeating disclaimers for every school. End with exactly three short
-  shared cautions: Scorecard costs are not the student's actual price; overall
-  admission rate is not an individual admission probability; and CIP categories
-  are broad federal fields rather than exact catalog major names. Tell the student
-  to use the recommended field as a starting point for exploring specific majors
-  on official university websites. Do not add cautions about the
-  student's background, cultural adjustment, activities, or academic readiness.
+  shared cautions written directly to the user: Scorecard costs may not be your
+  actual price; overall admission rate is not your personal admission probability;
+  and CIP categories are broad federal fields rather than exact catalog major
+  names. Then say directly: "Use these reported fields as a starting point for
+  exploring specific majors on official university websites." Localize this
+  naturally in Chinese. Do not add cautions about background, cultural adjustment,
+  activities, or academic readiness.
 - Title the final section "说明" when writing in Chinese and "Notes and
   limitations" when writing in English. Never expose internal field names such as
   matching_bachelors_fields.
@@ -618,6 +624,7 @@ def parse_targets(value: str) -> list[str]:
         for item in value.split(",")
         if normalize_school_name(item)
         and normalize_school_name(item) != "no specific target"
+        and item.strip() != "无特定目标"
     ]
 
 
@@ -838,6 +845,29 @@ def fetch_colleges(preferences: dict) -> list[dict]:
         page += 1
 
     return colleges
+
+
+@lru_cache(maxsize=64)
+def _cached_colleges(preferences_json: str) -> str:
+    preferences = json.loads(preferences_json)
+    return json.dumps(fetch_colleges(preferences), ensure_ascii=False)
+
+
+def fetch_colleges_cached(preferences: dict) -> list[dict]:
+    """Cache identical Scorecard searches for the lifetime of the API process."""
+    key = json.dumps(preferences, ensure_ascii=False, sort_keys=True)
+    return json.loads(_cached_colleges(key))
+
+
+@lru_cache(maxsize=64)
+def _cached_bachelors_fields(school_ids: tuple[int, ...]) -> str:
+    result = fetch_bachelors_fields_for_schools(list(school_ids))
+    return json.dumps(result, ensure_ascii=False)
+
+
+def fetch_bachelors_fields_cached(school_ids: list[int]) -> dict[int, list[dict]]:
+    payload = json.loads(_cached_bachelors_fields(tuple(sorted(school_ids))))
+    return {int(school_id): fields for school_id, fields in payload.items()}
 
 
 def filter_by_institution_format(
@@ -1110,7 +1140,7 @@ def recommend_colleges(llm, student_context: str, language="en") -> None:
 {json.dumps(verified_candidates, ensure_ascii=False, indent=2)}
 
 Recommend exactly {final_count} schools. Explain that the
-Scorecard cost is not necessarily the student's net price. Do not derive an
+Scorecard cost is not necessarily your actual price. Do not derive an
 admission probability or Reach, Target, Safety, or Likely label from overall
 admission rate. Interpret competition preference only as requested institutional
 selectivity. The requested target is {preferences.get("targets", "")!r}. Only that
@@ -1132,6 +1162,121 @@ school or system may be labeled as a target; all other schools are alternatives.
                 print(f"- {display_name}")
     print()
     stream_response(llm, COLLEGE_SYSTEM_PROMPT + output_language_instruction(language), prompt)
+
+
+def stream_college_recommendations(
+    llm,
+    student_context: str,
+    preferences: dict,
+    language="en",
+):
+    """Run the terminal college recommendation pipeline with web form values."""
+    started_at = time.perf_counter()
+    preferences = dict(preferences)
+    field = str(preferences.get("field", "")).strip()
+    preferences["field"] = CHINESE_FIELD_ALIASES.get(field, field)
+    preferences["states"] = ", ".join(
+        sorted(
+            {
+                state.strip().upper()
+                for state in str(preferences.get("states", "")).split(",")
+                if state.strip()
+            }
+        )
+    )
+    preferences["targets"] = (
+        str(preferences.get("targets", "")).strip() or "No specific target"
+    )
+    requested_count = int(preferences.pop("count", 5))
+
+    base_colleges = fetch_colleges_cached(preferences)
+    colleges = filter_by_institution_format(
+        base_colleges, preferences["institution_format"]
+    )
+    colleges = filter_by_size(colleges, preferences["size"])
+    colleges = filter_by_selectivity(colleges, preferences["competition"])
+    colleges = filter_by_max_cost(colleges, preferences["max_cost"])
+    candidate_limit = min(60, max(30, requested_count * 3))
+    candidates = rank_colleges(colleges, preferences, candidate_limit)
+
+    def verify(candidate_schools: list[dict]) -> list[dict]:
+        if not candidate_schools:
+            return []
+        fields_by_school = fetch_bachelors_fields_cached(
+            [college["id"] for college in candidate_schools]
+        )
+        verified = []
+        for college in candidate_schools:
+            matches = matching_programs(
+                preferences["field"], fields_by_school.get(college["id"], [])
+            )
+            if matches:
+                verified.append(
+                    {**college, "matching_bachelors_fields": matches}
+                )
+        return verified
+
+    verified_candidates = verify(candidates)
+
+    final_count = min(requested_count, len(verified_candidates))
+    if final_count == 0:
+        # Keep state/ownership constraints from the Scorecard request, but relax
+        # cost, size, format, and selectivity to offer transparent alternatives.
+        relaxed_candidates = rank_colleges(
+            base_colleges, preferences, min(30, max(10, requested_count * 3))
+        )
+        alternatives = verify(relaxed_candidates)[: min(requested_count, 5)]
+        if language == "zh":
+            yield "没有大学同时满足你当前的全部筛选条件和专业领域要求。\n\n"
+            if alternatives:
+                yield "如果放宽费用、规模、学校类型或竞争程度，以下学校仍有相关的 College Scorecard 本科专业领域数据：\n\n"
+                for college in alternatives:
+                    field_title = college["matching_bachelors_fields"][0]["title"]
+                    yield f"- {college['school.name']}（{college['school.city']}, {college['school.state']}）— {field_title}\n"
+            else:
+                yield "目前也没有找到有充分专业领域数据支持的备选学校。\n"
+            yield "\n你可以尝试扩大州范围、提高费用上限、选择不限学校规模或竞争程度，或者使用更宽泛的专业领域名称。"
+        else:
+            yield "No colleges matched all of your current filters and field-of-study requirement.\n\n"
+            if alternatives:
+                yield "If you relax cost, size, institution format, or selectivity, these schools still have relevant College Scorecard bachelor's-field data:\n\n"
+                for college in alternatives:
+                    field_title = college["matching_bachelors_fields"][0]["title"]
+                    yield f"- {college['school.name']} ({college['school.city']}, {college['school.state']}) — {field_title}\n"
+            else:
+                yield "No sufficiently supported alternatives were found either.\n"
+            yield "\nTry expanding the states, raising the cost limit, allowing any school size or selectivity, or using a broader field name."
+        return
+    verified_candidates = verified_candidates[:final_count]
+    preparation_seconds = time.perf_counter() - started_at
+    if os.getenv("COLLEGE_GUIDANCE_DEBUG", "").lower() in {"1", "true", "yes"}:
+        print(f"Web college recommendation preparation: {preparation_seconds:.2f}s")
+    prompt = f"""=== DOCUMENTED STUDENT EVIDENCE ===
+{student_context}
+
+=== STUDENT INPUT ===
+{json.dumps(preferences, ensure_ascii=False, indent=2)}
+
+=== COLLEGE SCORECARD CANDIDATES ===
+{json.dumps(verified_candidates, ensure_ascii=False, indent=2)}
+
+Recommend exactly {final_count} schools. You requested {requested_count}.
+If fewer are returned, state that only {final_count} had sufficiently matching
+Scorecard data under the selected filters. Do not derive an admission probability
+or Reach, Target, Safety, or Likely label from scores or overall admission rate.
+The requested target is {preferences.get("targets", "")!r}; only that school or
+system may be labeled as a target."""
+    for chunk in llm.stream(
+        [
+            (
+                "system",
+                COLLEGE_SYSTEM_PROMPT + output_language_instruction(language),
+            ),
+            ("user", prompt),
+        ]
+    ):
+        if chunk.content:
+            yield chunk.content
 
 
 def run_college_major_matching(

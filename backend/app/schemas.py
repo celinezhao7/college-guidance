@@ -1,6 +1,6 @@
 """Response models exposed by the College Guidance API."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class HealthResponse(BaseModel):
@@ -30,3 +30,34 @@ class RecommendationRequest(BaseModel):
     profile_id: str
     mode: str
     language: str = "en"
+    query: str = ""
+    college_preferences: "CollegePreferences | None" = None
+
+
+class CollegePreferences(BaseModel):
+    sat: int | None = Field(default=None, ge=400, le=1600)
+    act: int | None = Field(default=None, ge=1, le=36)
+    states: str = "CA"
+    max_cost: float | None = Field(default=None, gt=0)
+    size: list[str] = ["any"]
+    ownership: list[str] = ["any"]
+    institution_format: list[str] = ["either"]
+    competition: list[str] = ["any"]
+    field: str = "Computer Science"
+    targets: str = "No specific target"
+    count: int = Field(default=5, ge=1, le=20)
+
+
+class ChatRequest(BaseModel):
+    session_id: str | None = None
+    profile_id: str
+    language: str = "en"
+    message: str = ""
+
+
+class ChatResponse(BaseModel):
+    session_id: str
+    reply: str
+    ready: bool
+    preferences: CollegePreferences
+    answered: list[str]
