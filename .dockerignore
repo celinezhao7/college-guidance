@@ -10,7 +10,3 @@ frontend/dist
 **/__pycache__
 **/*.pyc
 docs
-chroma/student
-chroma/student/**
-data/student_profiles
-data/student_profiles/**

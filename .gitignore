@@ -36,7 +36,11 @@ chroma/*
 !chroma/uc/**
 !chroma/common_app/
 !chroma/common_app/**
+!chroma/student/
+!chroma/student/**
 !data/scorecard_school_catalog.json
+!data/student_profiles/
+!data/student_profiles/**
 
 # Editors and operating systems
 .vscode/
