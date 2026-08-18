@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: college-guidance-demo
+    name: college-guidance
     runtime: docker
     plan: free
     dockerfilePath: ./Dockerfile
@@ -16,5 +16,3 @@ services:
         sync: false
       - key: COLLEGE_GUIDANCE_DEBUG
         value: "false"
-      - key: COLLEGE_GUIDANCE_DEMO
-        value: "true"

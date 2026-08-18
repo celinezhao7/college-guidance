@@ -1,4 +1,4 @@
-# Limited Render Demo Deployment
+# Limited Render Deployment
 
 This configuration deploys the React frontend and FastAPI backend as one Docker
 web service. It is intended for a limited demo, not a production launch.
