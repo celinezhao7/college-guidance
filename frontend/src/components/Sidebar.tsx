@@ -1,4 +1,4 @@
-import { Plus } from "lucide-react"
+import { GraduationCap, Plus } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import type { Profile, RecommendationMode } from "@/lib/api"
@@ -17,7 +17,7 @@ type SidebarProps = {
 }
 
 const selectClassName =
-  "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm disabled:opacity-50"
+  "w-full rounded-lg border border-[#dddce7] bg-white/75 px-3 py-2 text-sm shadow-[0_2px_10px_rgba(84,78,112,0.035)] outline-none transition focus:border-[#aaa6ca] focus:ring-2 focus:ring-[#b8b4d8]/20 disabled:opacity-50"
 
 export function Sidebar({
   profiles,
@@ -33,10 +33,18 @@ export function Sidebar({
 }: SidebarProps) {
   const zh = language === "zh"
   return (
-    <aside className="flex w-64 flex-col border-r border-zinc-200 bg-[#f0eee8] p-3">
+    <aside className="dream-sidebar flex w-64 flex-col border-r border-[#e3e1ea] p-3">
+      <div className="flex items-center gap-2.5 px-2 pb-5 pt-2">
+        <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/70 text-[#5f5b82] shadow-sm">
+          <GraduationCap className="h-4.5 w-4.5" />
+        </div>
+        <span className="font-heading text-lg font-semibold tracking-tight text-[#3f3d58]">
+          CollegeGuide
+        </span>
+      </div>
       <Button
         variant="ghost"
-        className="justify-start gap-2 rounded-lg"
+        className="justify-start gap-2 rounded-lg text-[#45445a] hover:bg-white/55 hover:text-[#343247]"
         onClick={onNewChat}
       >
         <Plus className="h-4 w-4" />

@@ -26,3 +26,119 @@
 
   /* keep the rest of your existing variables exactly as they are */
 }
+
+@layer base {
+  body {
+    margin: 0;
+    min-width: 320px;
+    background: #f9f8fc;
+  }
+}
+
+@layer components {
+  .dream-shell {
+    background: #ffffff;
+  }
+
+  .dream-sidebar {
+    background:
+      radial-gradient(circle at 18% 12%, rgba(217, 216, 242, 0.48), transparent 38%),
+      radial-gradient(circle at 74% 88%, rgba(246, 219, 227, 0.42), transparent 42%),
+      linear-gradient(180deg, rgba(247, 246, 251, 0.96), rgba(244, 242, 248, 0.94));
+  }
+
+  .dream-heading {
+    background: linear-gradient(100deg, #34364f 10%, #555179 52%, #755e78 92%);
+    background-clip: text;
+    color: transparent;
+  }
+
+  .dream-mode-button {
+    display: flex;
+    min-height: 3.5rem;
+    align-items: center;
+    justify-content: center;
+    gap: 0.55rem;
+    border: 1px solid rgba(205, 202, 220, 0.78);
+    border-radius: 1rem;
+    background: linear-gradient(110deg, var(--mode-start), var(--mode-end));
+    padding: 0.85rem 1rem;
+    color: #5b5870;
+    font-size: 0.875rem;
+    font-weight: 500;
+    box-shadow: 0 5px 18px rgba(75, 68, 96, 0.04);
+    transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease, color 160ms ease;
+  }
+
+  .dream-mode-button:nth-child(1) {
+    --mode-start: rgba(239, 239, 249, 0.75);
+    --mode-end: rgba(242, 239, 248, 0.73);
+    --mode-active-start: rgba(221, 222, 243, 0.92);
+    --mode-active-end: rgba(228, 221, 240, 0.91);
+  }
+
+  .dream-mode-button:nth-child(2) {
+    --mode-start: rgba(242, 239, 248, 0.73);
+    --mode-end: rgba(246, 239, 246, 0.72);
+    --mode-active-start: rgba(228, 221, 240, 0.91);
+    --mode-active-end: rgba(235, 221, 237, 0.89);
+  }
+
+  .dream-mode-button:nth-child(3) {
+    --mode-start: rgba(246, 239, 246, 0.72);
+    --mode-end: rgba(249, 239, 244, 0.7);
+    --mode-active-start: rgba(235, 221, 237, 0.89);
+    --mode-active-end: rgba(242, 220, 234, 0.88);
+  }
+
+  .dream-mode-button:hover:not(:disabled) {
+    transform: translateY(-1px);
+    border-color: rgba(171, 165, 201, 0.9);
+    color: #45425e;
+    box-shadow: 0 8px 22px rgba(75, 68, 96, 0.075);
+  }
+
+  .dream-mode-button.is-active {
+    border-color: rgba(151, 143, 190, 0.9);
+    background: linear-gradient(110deg, var(--mode-active-start), var(--mode-active-end));
+    color: #45415f;
+    box-shadow: 0 8px 24px rgba(91, 80, 127, 0.1);
+  }
+
+  .dream-mode-button:focus-visible {
+    outline: 2px solid rgba(137, 130, 177, 0.7);
+    outline-offset: 2px;
+  }
+
+  .dream-mode-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+
+  .dream-composer {
+    border-color: transparent;
+    background:
+      linear-gradient(rgba(255, 255, 255, 0.94), rgba(255, 255, 255, 0.94)) padding-box,
+      linear-gradient(110deg, rgba(174, 188, 224, 0.75), rgba(207, 186, 222, 0.65), rgba(235, 193, 209, 0.65)) border-box;
+  }
+
+  .dream-composer:focus-within {
+    box-shadow: 0 14px 38px rgba(91, 81, 122, 0.12);
+  }
+
+  .dream-send {
+    background: linear-gradient(135deg, #5d668e, #7c6489);
+  }
+
+  .dream-send:hover:not(:disabled) {
+    background: linear-gradient(135deg, #515b84, #705a7f);
+  }
+
+  .dream-message {
+    background: linear-gradient(120deg, rgba(226, 232, 249, 0.88), rgba(239, 226, 242, 0.82));
+  }
+
+  .dream-chip {
+    background: linear-gradient(110deg, rgba(225, 231, 247, 0.9), rgba(242, 226, 238, 0.8));
+  }
+}
