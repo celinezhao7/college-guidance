@@ -533,7 +533,7 @@ def _quick_replies(conversation: Conversation) -> list[dict[str, str]]:
             "scenario_college": "I have a target college",
             "scenario_major": "I have a target field",
             "scenario_explore": "I’m unsure about both",
-            "no_target": "No target yet—help me explore",
+            "no_target": "Changed your mind? Explore without a target →",
             "field_yes": "Yes",
             "field_no": "No, I’ll re-enter it",
             "skip": "Skip",
