@@ -71,8 +71,8 @@ class CollegeFirstConversationTests(unittest.TestCase):
         self.assertEqual(result["scenario"], "college_first")
         self.assertEqual(result["preferences"]["targets"], "University of Michigan-Ann Arbor")
 
-        def test_chinese_target_is_resolved_to_scorecard_official_name(self) -> None:
-            session_id = self._start_college_first("zh")
+    def test_chinese_target_is_resolved_to_scorecard_official_name(self) -> None:
+        session_id = self._start_college_first("zh")
 
         with patch(
             "backend.app.conversation_service._classify_target_college",
@@ -176,6 +176,49 @@ class CollegeFirstConversationTests(unittest.TestCase):
 
         self.assertEqual(result["scenario"], "college_first")
         self.assertEqual([reply["id"] for reply in result["quick_replies"]], ["no_target"])
+
+
+class FieldConversationTests(unittest.TestCase):
+    def _start_major_first(self, language: str = "zh") -> str:
+        first = chat(None, "test-profile", language, "hi")
+        second = chat(first["session_id"], "test-profile", language, "2")
+        self.assertEqual(second["scenario"], "major_first")
+        return second["session_id"]
+
+    def test_pinyin_field_is_corrected_and_requires_confirmation(self) -> None:
+        session_id = self._start_major_first("zh")
+
+        result = chat(session_id, "test-profile", "zh", "diannao")
+
+        self.assertFalse(result["ready"])
+        self.assertNotIn("field", result["answered"])
+        self.assertIn("计算机科学", result["reply"])
+        self.assertIn("field_yes", [reply["id"] for reply in result["quick_replies"]])
+
+        confirmed = chat(session_id, "test-profile", "zh", "是")
+        self.assertEqual(confirmed["preferences"]["field"], "计算机科学")
+        self.assertIn("field", confirmed["answered"])
+        self.assertIn("SAT", confirmed["reply"])
+
+    def test_unrecognized_field_does_not_advance(self) -> None:
+        session_id = self._start_major_first("zh")
+
+        with patch.dict("os.environ", {"DASHSCOPE_API_KEY": ""}):
+            result = chat(session_id, "test-profile", "zh", "asdfgh")
+
+        self.assertNotIn("field", result["answered"])
+        self.assertNotIn("SAT", result["reply"])
+        self.assertIn("无法可靠识别", result["reply"])
+
+    def test_replacement_after_correction_is_revalidated(self) -> None:
+        session_id = self._start_major_first("zh")
+        chat(session_id, "test-profile", "zh", "diannao")
+
+        with patch.dict("os.environ", {"DASHSCOPE_API_KEY": ""}):
+            result = chat(session_id, "test-profile", "zh", "不是，asdfgh")
+
+        self.assertNotIn("field", result["answered"])
+        self.assertIn("无法可靠识别", result["reply"])
 
 
 if __name__ == "__main__":

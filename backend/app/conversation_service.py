@@ -133,6 +133,13 @@ class TargetCollegeIntent:
     confidence: float
 
 
+@dataclass(frozen=True)
+class FieldIntent:
+    intent: str
+    field_name: str | None
+    confidence: float
+
+
 def _classify_target_college(message: str) -> TargetCollegeIntent:
     """Classify a free-form target-college answer without treating it as a name."""
     api_key = os.getenv("DASHSCOPE_API_KEY")
@@ -437,9 +444,9 @@ def _acknowledgement(language: str) -> str:
 def _question(conversation: Conversation, key: str) -> str:
     if key == "targets" and conversation.scenario == "college_first":
         return (
-            "Which target college or university system would you like to explore? You may enter its English or Chinese name, or a common abbreviation such as UC or UMich."
+            "Which target college or university system would you like to explore? Please enter its official English name or a common abbreviation such as UC or UMich."
             if conversation.language == "en"
-            else "你想探索哪所目标大学或大学系统？可以输入中文或英文校名，也可以使用 UC、UMich 等常用缩写。"
+            else "你想探索哪所目标大学或大学系统？可以输入中文或英文校名，也可以使用 UC、UMich 等常用缩写；中文校名会先转换为英文，再与 College Scorecard 核对。"
         )
     return QUESTIONS[conversation.language][key]
 
@@ -461,6 +468,81 @@ def _infer_field(message: str) -> str | None:
         "生物": "生物学",
     }
     return next((field for term, field in fields.items() if term in lowered), None)
+
+
+def _classify_field(message: str, language: str) -> FieldIntent:
+    """Validate and normalize an academic field instead of accepting arbitrary text."""
+    normalized = " ".join(
+        re.sub(r"[^a-zA-Z0-9\u3400-\u9fff]+", " ", message.lower()).split()
+    )
+    exact_aliases = {
+        "computer science": "Computer Science",
+        "data science": "Data Science",
+        "engineering": "Engineering",
+        "business": "Business",
+        "psychology": "Psychology",
+        "biology": "Biology",
+        "economics": "Economics",
+        "political science": "Political Science",
+        "计算机科学": "计算机科学",
+        "数据科学": "数据科学",
+        "工程": "工程",
+        "商科": "商科",
+        "心理学": "心理学",
+        "生物学": "生物学",
+        "经济学": "经济学",
+        "政治学": "政治学",
+    }
+    if normalized in exact_aliases:
+        return FieldIntent("valid", exact_aliases[normalized], 1.0)
+
+    correction_aliases = {
+        "computer": "Computer Science",
+        "cs": "Computer Science",
+        "comp sci": "Computer Science",
+        "compsci": "Computer Science",
+        "diannao": "计算机科学" if language == "zh" else "Computer Science",
+        "jisuanji": "计算机科学" if language == "zh" else "Computer Science",
+        "计算机": "计算机科学",
+    }
+    if normalized in correction_aliases:
+        return FieldIntent("corrected", correction_aliases[normalized], 1.0)
+
+    api_key = os.getenv("DASHSCOPE_API_KEY")
+    if not api_key:
+        return FieldIntent("unclear", None, 0.0)
+    try:
+        from langchain_openai import ChatOpenAI
+
+        output_language = "Simplified Chinese" if language == "zh" else "English"
+        prompt = f"""Determine whether the user's text names an academic field of study.
+Return one JSON object with exactly these fields:
+- intent: "valid", "corrected", or "unclear"
+- field_name: a concise canonical field name in {output_language}, or null
+- confidence: a number from 0 to 1
+
+Use "corrected" when you repaired a typo, pinyin, informal shorthand, or translated the input. Use "valid" only when the input already clearly names a field. Use "unclear" for unrelated text, gibberish, or an unsafe guess. Do not invent a field. Return JSON only."""
+        llm = ChatOpenAI(
+            model=os.getenv("QWEN_MODEL", "qwen3.5-plus"),
+            api_key=api_key,
+            base_url=os.getenv("DASHSCOPE_BASE_URL"),
+            temperature=0,
+            extra_body={"enable_thinking": False},
+        ).bind(response_format={"type": "json_object"})
+        response = llm.invoke([("system", prompt), ("human", message[:500])])
+        content = response.content if isinstance(response.content, str) else str(response.content)
+        data = json.loads(content.strip().removeprefix("```json").removesuffix("```").strip())
+        intent = data.get("intent")
+        field_name = data.get("field_name")
+        confidence = max(0.0, min(float(data.get("confidence", 0)), 1.0))
+        if intent not in {"valid", "corrected", "unclear"}:
+            raise ValueError(f"Unknown field intent: {intent}")
+        if intent != "unclear" and not isinstance(field_name, str):
+            return FieldIntent("unclear", None, 0.0)
+        return FieldIntent(intent, field_name, confidence)
+    except Exception:
+        logger.exception("Could not classify the field-of-study answer")
+        return FieldIntent("unclear", None, 0.0)
 
 
 def _ambiguous_field(message: str) -> str | None:
@@ -635,10 +717,14 @@ def chat(
             conversation.awaiting = "field"
             return _response(conversation, QUESTIONS[conversation.language]["field"])
         elif message.strip():
-            conversation.preferences["field"] = message.strip()
-            conversation.answered.add("field")
             conversation.proposed_field = None
-            acknowledgement = _acknowledgement(conversation.language)
+            conversation.awaiting = "field"
+            return chat(
+                conversation.id,
+                conversation.profile_id,
+                conversation.language,
+                message,
+            )
         else:
             return _response(
                 conversation,
@@ -681,14 +767,25 @@ def chat(
                 return _response(conversation, reply)
             message = resolved_target
         if conversation.awaiting == "field":
-            proposed_field = _ambiguous_field(message)
-            if proposed_field:
-                conversation.proposed_field = proposed_field
+            field_intent = _classify_field(message, conversation.language)
+            if field_intent.confidence < 0.8 or field_intent.intent == "unclear":
+                reply = (
+                    "I couldn’t reliably identify an academic field. Please enter a field such as Computer Science, Economics, or Biology."
+                    if conversation.language == "en"
+                    else "我无法可靠识别这个专业领域。请输入较完整的专业名称，例如“计算机科学”“经济学”或“生物学”。"
+                )
+                return _response(conversation, reply)
+            if field_intent.intent == "corrected":
+                conversation.proposed_field = field_intent.field_name
                 conversation.awaiting = "field_confirmation"
                 return _response(
                     conversation,
-                    _field_confirmation(conversation.language, proposed_field),
+                    _field_confirmation(
+                        conversation.language,
+                        field_intent.field_name or "Computer Science",
+                    ),
                 )
+            message = field_intent.field_name or message
         if not _parse(conversation.awaiting, message, conversation.preferences):
             prefix = "I couldn’t understand that. " if conversation.language == "en" else "我没有理解这个回答。"
             return _response(conversation, prefix + _question(conversation, conversation.awaiting))
