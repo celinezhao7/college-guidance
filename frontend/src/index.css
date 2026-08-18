@@ -43,6 +43,7 @@
   .dream-sidebar {
     background:
       radial-gradient(circle at 18% 12%, rgba(217, 216, 242, 0.48), transparent 38%),
+      radial-gradient(circle at 90% 78%, rgba(237, 158, 91, 0.08), transparent 28%),
       radial-gradient(circle at 74% 88%, rgba(246, 219, 227, 0.42), transparent 42%),
       linear-gradient(180deg, rgba(247, 246, 251, 0.96), rgba(244, 242, 248, 0.94));
   }
@@ -86,9 +87,9 @@
 
   .dream-mode-button:nth-child(3) {
     --mode-start: rgba(246, 239, 246, 0.72);
-    --mode-end: rgba(249, 239, 244, 0.7);
+    --mode-end: rgba(249, 237, 232, 0.7);
     --mode-active-start: rgba(235, 221, 237, 0.89);
-    --mode-active-end: rgba(242, 220, 234, 0.88);
+    --mode-active-end: rgba(242, 219, 228, 0.88);
   }
 
   .dream-mode-button:hover:not(:disabled) {
@@ -119,7 +120,7 @@
     border-color: transparent;
     background:
       linear-gradient(rgba(255, 255, 255, 0.94), rgba(255, 255, 255, 0.94)) padding-box,
-      linear-gradient(110deg, rgba(174, 188, 224, 0.75), rgba(207, 186, 222, 0.65), rgba(235, 193, 209, 0.65)) border-box;
+      linear-gradient(110deg, rgba(174, 188, 224, 0.75), rgba(207, 186, 222, 0.65), rgba(235, 193, 209, 0.65), rgba(237, 158, 91, 0.18)) border-box;
   }
 
   .dream-composer:focus-within {
