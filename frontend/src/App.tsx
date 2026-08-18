@@ -52,7 +52,6 @@ function App() {
         setProfiles(nextProfiles)
         setModes(nextModes)
         setProfileId(nextProfiles[0]?.id ?? "")
-        setModeId(nextModes[0]?.id ?? "")
       })
       .catch((error: unknown) => {
         setSetupError(
@@ -225,6 +224,7 @@ function App() {
 
   function handleNewChat() {
     setMessages([])
+    setModeId("")
     setSessionId(null)
     setAnsweredPreferences([])
     setQuickReplies([])
