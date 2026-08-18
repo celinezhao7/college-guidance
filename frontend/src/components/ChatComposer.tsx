@@ -21,7 +21,7 @@ export function ChatComposer({
   placeholder = "Ask about colleges, majors, or your application...",
 }: ChatComposerProps) {
   return (
-    <div className="w-full rounded-3xl border border-zinc-300 bg-white p-3 shadow-sm">
+    <div className="dream-composer w-full rounded-3xl border p-3 shadow-[0_12px_32px_rgba(72,65,94,0.08)]">
       <Textarea
         value={input}
         onChange={(event) => setInput(event.target.value)}
@@ -41,7 +41,7 @@ export function ChatComposer({
           size="icon"
           onClick={onSend}
           disabled={disabled || (requireInput && !input.trim())}
-          className="h-9 w-9 rounded-full"
+          className="dream-send h-9 w-9 rounded-full border-0 text-white"
         >
           <ArrowUp className="h-4 w-4" />
         </Button>

@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { BookOpenText, Compass, FilePenLine } from "lucide-react"
 
 import { ChatComposer } from "@/components/ChatComposer"
 import { ChatMessage, type Message } from "@/components/ChatMessage"
@@ -218,7 +219,7 @@ function App() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#f7f6f2] text-zinc-900">
+    <div className="dream-shell flex h-screen overflow-hidden text-zinc-900">
       <Sidebar
         profiles={profiles}
         modes={modes}
@@ -236,8 +237,8 @@ function App() {
         {messages.length === 0 ? (
           <div className="flex flex-1 items-center justify-center px-6">
             <div className="w-full max-w-3xl">
-              <div className="mb-8 text-center">
-                <h1 className="text-3xl font-medium tracking-tight">
+              <div className="mb-6 text-center">
+                <h1 className="dream-heading text-3xl font-medium tracking-tight">
                   {zh ? "今天想探索什么？" : "How can I help you today?"}
                 </h1>
                 <p className="mt-2 text-sm text-zinc-500">
@@ -248,6 +249,38 @@ function App() {
                     {zh ? "无法连接后端：" : "Could not load the backend: "}{setupError}
                   </p>
                 )}
+              </div>
+              <div className="mb-6 grid gap-3 sm:grid-cols-3" aria-label={zh ? "选择推荐功能" : "Choose a recommendation tool"}>
+                <button
+                  type="button"
+                  aria-pressed={modeId === "college_field"}
+                  disabled={controlsDisabled}
+                  onClick={() => setModeId("college_field")}
+                  className={`dream-mode-button ${modeId === "college_field" ? "is-active" : ""}`}
+                >
+                  <Compass className="h-4.5 w-4.5" />
+                  <span>{zh ? "大学与专业" : "Colleges & majors"}</span>
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={modeId === "common_app"}
+                  disabled={controlsDisabled}
+                  onClick={() => setModeId("common_app")}
+                  className={`dream-mode-button ${modeId === "common_app" ? "is-active" : ""}`}
+                >
+                  <FilePenLine className="h-4.5 w-4.5" />
+                  <span>{zh ? "Common App 文书" : "Common App essay"}</span>
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={modeId === "uc_piq"}
+                  disabled={controlsDisabled}
+                  onClick={() => setModeId("uc_piq")}
+                  className={`dream-mode-button ${modeId === "uc_piq" ? "is-active" : ""}`}
+                >
+                  <BookOpenText className="h-4.5 w-4.5" />
+                  <span>{zh ? "UC PIQ 题目" : "UC PIQ prompts"}</span>
+                </button>
               </div>
               {modeId === "college_field" && (
                 <p className="mb-5 text-center text-sm text-zinc-500">
@@ -325,7 +358,7 @@ function PreferenceSummary({ preferences, answered, language }: { preferences: C
   }
   return (
     <div className="mb-3 flex flex-wrap gap-2">
-      {answered.map((key) => <span key={key} className="rounded-full bg-zinc-200 px-3 py-1 text-xs text-zinc-700">{labels[key]}</span>)}
+      {answered.map((key) => <span key={key} className="dream-chip rounded-full px-3 py-1 text-xs text-zinc-700">{labels[key]}</span>)}
     </div>
   )
 }

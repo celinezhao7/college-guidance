@@ -13,7 +13,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[70%] rounded-2xl bg-[#e9e7e1] px-4 py-2.5">
+        <div className="dream-message max-w-[70%] rounded-2xl px-4 py-2.5 text-[#383748]">
           <p className="whitespace-pre-wrap leading-7">
             {message.content}
           </p>
