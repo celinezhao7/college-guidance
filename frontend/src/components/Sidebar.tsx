@@ -33,7 +33,7 @@ export function Sidebar({
 }: SidebarProps) {
   const zh = language === "zh"
   return (
-    <aside className="dream-sidebar flex w-64 flex-col border-r border-[#e3e1ea] p-3">
+    <aside className="dream-sidebar flex w-72 flex-col border-r border-[#e3e1ea] p-3">
       <div className="flex items-center gap-2.5 px-2 pb-5 pt-2">
         <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/70 text-[#5f5b82] shadow-sm">
           <GraduationCap className="h-4.5 w-4.5" />
