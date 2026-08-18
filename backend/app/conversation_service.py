@@ -1,8 +1,14 @@
 """In-memory guided conversation state for college recommendations."""
 
 from dataclasses import dataclass, field
+import json
+import logging
+import os
 import re
 from uuid import uuid4
+
+
+logger = logging.getLogger(__name__)
 
 
 MAJOR_FIRST_QUESTIONS = [
@@ -118,6 +124,86 @@ def _is_skip(message: str) -> bool:
         "都行", "哪里都可以", "什么都可以",
     }
     return value in exact or any(phrase in value for phrase in phrases)
+
+
+@dataclass(frozen=True)
+class TargetCollegeIntent:
+    intent: str
+    college_name: str | None
+    confidence: float
+
+
+def _classify_target_college(message: str) -> TargetCollegeIntent:
+    """Classify a free-form target-college answer without treating it as a name."""
+    api_key = os.getenv("DASHSCOPE_API_KEY")
+    if not api_key:
+        return TargetCollegeIntent("unclear", None, 0.0)
+
+    prompt = """Classify the student's answer to: 'Which target college or university system would you like to explore?'
+
+Return one JSON object with exactly these fields:
+- intent: "target_college", "no_target", or "unclear"
+- college_name: the school/system name from the answer, or null
+- confidence: a number from 0 to 1
+
+Meaning:
+- target_college: the student actually named a college or university system. Preserve its official/common English name or abbreviation.
+- no_target: the student says they do not know, have not decided, want help choosing, or currently have no target.
+- unclear: the answer is unrelated, ambiguous, empty, or cannot safely be interpreted.
+
+Do not invent or translate a college name. Examples: "UMich" is target_college; "you pick for me" is no_target; "maybe" is unclear.
+    Return JSON only."""
+    try:
+        from langchain_openai import ChatOpenAI
+
+        llm = ChatOpenAI(
+            model=os.getenv("QWEN_MODEL", "qwen3.5-plus"),
+            api_key=api_key,
+            base_url=os.getenv("DASHSCOPE_BASE_URL"),
+            temperature=0,
+            extra_body={"enable_thinking": False},
+        ).bind(response_format={"type": "json_object"})
+        response = llm.invoke([
+            ("system", prompt),
+            ("human", message[:1000]),
+        ])
+        content = response.content if isinstance(response.content, str) else str(response.content)
+        data = json.loads(content.strip().removeprefix("```json").removesuffix("```").strip())
+        intent = data.get("intent")
+        college_name = data.get("college_name")
+        confidence = float(data.get("confidence", 0))
+        if intent not in {"target_college", "no_target", "unclear"}:
+            raise ValueError(f"Unknown target-college intent: {intent}")
+        if intent == "target_college" and not isinstance(college_name, str):
+            return TargetCollegeIntent("unclear", None, 0.0)
+        return TargetCollegeIntent(intent, college_name, max(0.0, min(confidence, 1.0)))
+    except Exception:
+        logger.exception("Could not classify the target-college answer")
+        return TargetCollegeIntent("unclear", None, 0.0)
+
+
+def _resolve_scorecard_target(name: str) -> str | None:
+    """Resolve a model-extracted target against the College Scorecard catalog."""
+    from src.college_major import (
+        UC_SYSTEM_ALIASES,
+        normalize_school_name,
+        search_school_candidates,
+    )
+
+    normalized = normalize_school_name(name)
+    if normalized in UC_SYSTEM_ALIASES:
+        return "UC"
+    candidates = search_school_candidates(name, set())
+    if not candidates:
+        return None
+    top = candidates[0]
+    second_score = candidates[1]["_match_score"] if len(candidates) > 1 else -1
+    if top["_match_score"] >= 1.4 or (
+        top["_match_score"] >= 1.05
+        and top["_match_score"] - second_score >= 0.2
+    ):
+        return top["school.name"]
+    return None
 
 
 def _number(message: str) -> float | None:
@@ -408,19 +494,37 @@ def chat(
                 _field_confirmation(conversation.language, conversation.proposed_field or "Computer Science"),
             )
     elif conversation.awaiting:
-        if (
-            conversation.awaiting == "targets"
-            and conversation.scenario == "college_first"
-            and _is_skip(message)
-        ):
-            conversation.scenario = "explore"
-            conversation.awaiting = None
-            reply = (
-                "No problem. Since you don’t have a target college yet, I’ll recommend fields of study to explore based on your documented experiences."
-                if conversation.language == "en"
-                else "没问题。既然你目前没有目标大学，我会根据你记录的经历推荐值得探索的专业领域。"
-            )
-            return _response(conversation, reply, ready=True)
+        if conversation.awaiting == "targets" and conversation.scenario == "college_first":
+            target_intent = _classify_target_college(message)
+            if target_intent.confidence < 0.75 or target_intent.intent == "unclear":
+                reply = (
+                    "I’m not sure whether you named a college or meant that you don’t have one yet. Please enter the college’s official English name, or say that you’d like help choosing one."
+                    if conversation.language == "en"
+                    else "我不确定你是在提供大学名称，还是目前没有目标大学。请输入学校的英文官方名称，或者告诉我希望由我帮助选择。"
+                )
+                return _response(conversation, reply)
+            if target_intent.intent == "no_target":
+                conversation.scenario = "explore"
+                conversation.awaiting = None
+                reply = (
+                    "No problem. Since you don’t have a target college yet, I’ll recommend fields of study to explore based on your documented experiences."
+                    if conversation.language == "en"
+                    else "没问题。既然你目前没有目标大学，我会根据你记录的经历推荐值得探索的专业领域。"
+                )
+                return _response(conversation, reply, ready=True)
+            try:
+                resolved_target = _resolve_scorecard_target(target_intent.college_name or "")
+            except Exception:
+                logger.exception("Could not validate the target college")
+                resolved_target = None
+            if not resolved_target:
+                reply = (
+                    "I understood that as a college, but I couldn’t verify it in College Scorecard. Please enter its official English name, or tell me that you’d like help choosing a college."
+                    if conversation.language == "en"
+                    else "我理解你输入的是一所大学，但无法在 College Scorecard 中可靠确认。请输入学校的英文官方名称，或者告诉我希望由我帮助选择大学。"
+                )
+                return _response(conversation, reply)
+            message = resolved_target
         if conversation.awaiting == "field":
             proposed_field = _ambiguous_field(message)
             if proposed_field:
