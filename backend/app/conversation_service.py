@@ -147,11 +147,11 @@ Return one JSON object with exactly these fields:
 - confidence: a number from 0 to 1
 
 Meaning:
-- target_college: the student actually named a college or university system. Preserve its official/common English name or abbreviation.
+- target_college: the student actually named a college or university system. Extract the name as written by the student; preserve Chinese names for the later translation-and-verification step.
 - no_target: the student says they do not know, have not decided, want help choosing, or currently have no target.
 - unclear: the answer is unrelated, ambiguous, empty, or cannot safely be interpreted.
 
-Do not invent or translate a college name. Examples: "UMich" is target_college; "you pick for me" is no_target; "maybe" is unclear.
+Do not invent a school that the student did not name. Examples: "UMich" is target_college with college_name "UMich"; "密歇根大学" is target_college with college_name "密歇根大学"; "you pick for me" is no_target; "maybe" is unclear.
     Return JSON only."""
     try:
         from langchain_openai import ChatOpenAI
@@ -182,18 +182,74 @@ Do not invent or translate a college name. Examples: "UMich" is target_college; 
         return TargetCollegeIntent("unclear", None, 0.0)
 
 
+CHINESE_COLLEGE_ALIASES = {
+    "加州大学": "UC",
+    "加利福尼亚大学": "UC",
+    "加州大学伯克利分校": "University of California, Berkeley",
+    "加州大学洛杉矶分校": "University of California, Los Angeles",
+    "密歇根大学": "University of Michigan-Ann Arbor",
+    "密歇根大学安娜堡分校": "University of Michigan-Ann Arbor",
+    "南加州大学": "University of Southern California",
+    "纽约大学": "New York University",
+    "波士顿大学": "Boston University",
+    "东北大学": "Northeastern University",
+    "卡内基梅隆大学": "Carnegie Mellon University",
+}
+
+
+def _translate_college_name_to_english(name: str) -> str | None:
+    """Translate a Chinese college name for Scorecard lookup without selecting a school."""
+    compact = re.sub(r"\s+", "", name)
+    if compact in CHINESE_COLLEGE_ALIASES:
+        return CHINESE_COLLEGE_ALIASES[compact]
+    if not re.search(r"[\u3400-\u9fff]", name):
+        return name.strip()
+
+    api_key = os.getenv("DASHSCOPE_API_KEY")
+    if not api_key:
+        return None
+    try:
+        from langchain_openai import ChatOpenAI
+
+        llm = ChatOpenAI(
+            model=os.getenv("QWEN_MODEL", "qwen3.5-plus"),
+            api_key=api_key,
+            base_url=os.getenv("DASHSCOPE_BASE_URL"),
+            temperature=0,
+            extra_body={"enable_thinking": False},
+        )
+        response = llm.invoke([
+            (
+                "system",
+                "Translate the Chinese name of a U.S. college or university system into its most likely official English name. Return only the English name. Do not add explanations and do not invent a different school.",
+            ),
+            ("human", name[:300]),
+        ])
+        translated = response.content if isinstance(response.content, str) else str(response.content)
+        translated = translated.strip().strip('"\'').rstrip(".")
+        if not translated or re.search(r"[\u3400-\u9fff]", translated):
+            return None
+        return translated
+    except Exception:
+        logger.exception("Could not translate the Chinese college name")
+        return None
+
+
 def _resolve_scorecard_target(name: str) -> str | None:
-    """Resolve a model-extracted target against the College Scorecard catalog."""
+    """Translate when needed, then fuzzy-match against the Scorecard catalog."""
     from src.college_major import (
         UC_SYSTEM_ALIASES,
         normalize_school_name,
         search_school_candidates,
     )
 
-    normalized = normalize_school_name(name)
+    lookup_name = _translate_college_name_to_english(name)
+    if not lookup_name:
+        return None
+    normalized = normalize_school_name(lookup_name)
     if normalized in UC_SYSTEM_ALIASES:
         return "UC"
-    candidates = search_school_candidates(name, set())
+    candidates = search_school_candidates(lookup_name, set())
     if not candidates:
         return None
     top = candidates[0]
@@ -381,9 +437,9 @@ def _acknowledgement(language: str) -> str:
 def _question(conversation: Conversation, key: str) -> str:
     if key == "targets" and conversation.scenario == "college_first":
         return (
-            "Which target college or university system would you like to explore? Please use its official English name or a common abbreviation such as UC or UMich."
+            "Which target college or university system would you like to explore? You may enter its English or Chinese name, or a common abbreviation such as UC or UMich."
             if conversation.language == "en"
-            else "你想探索哪所目标大学或大学系统？请使用英文官方名称或 UC、UMich 等常用缩写。"
+            else "你想探索哪所目标大学或大学系统？可以输入中文或英文校名，也可以使用 UC、UMich 等常用缩写。"
         )
     return QUESTIONS[conversation.language][key]
 
@@ -597,9 +653,9 @@ def chat(
             )
             if target_intent.confidence < 0.75 or target_intent.intent == "unclear":
                 reply = (
-                    "I’m not sure whether you named a college or meant that you don’t have one yet. Please enter the college’s official English name, or say that you’d like help choosing one."
+                    "I’m not sure whether you named a college or meant that you don’t have one yet. Please enter its English or Chinese name, or say that you’d like help choosing one."
                     if conversation.language == "en"
-                    else "我不确定你是在提供大学名称，还是目前没有目标大学。请输入学校的英文官方名称，或者告诉我希望由我帮助选择。"
+                    else "我不确定你是在提供大学名称，还是目前没有目标大学。请输入中文或英文校名，或者告诉我希望由我帮助选择。"
                 )
                 return _response(conversation, reply)
             if target_intent.intent == "no_target":
@@ -618,9 +674,9 @@ def chat(
                 resolved_target = None
             if not resolved_target:
                 reply = (
-                    "I understood that as a college, but I couldn’t verify it in College Scorecard. Please enter its official English name, or tell me that you’d like help choosing a college."
+                    "I understood that as a college, but I couldn’t verify it in College Scorecard. Try its English or Chinese name with a campus identifier, or tell me that you’d like help choosing a college."
                     if conversation.language == "en"
-                    else "我理解你输入的是一所大学，但无法在 College Scorecard 中可靠确认。请输入学校的英文官方名称，或者告诉我希望由我帮助选择大学。"
+                    else "我理解你输入的是一所大学，但无法在 College Scorecard 中可靠确认。请尝试补充分校信息，或换一种中文/英文校名；也可以告诉我希望由我帮助选择大学。"
                 )
                 return _response(conversation, reply)
             message = resolved_target

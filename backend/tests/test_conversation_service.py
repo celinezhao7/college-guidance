@@ -1,7 +1,13 @@
 import unittest
-from unittest.mock import patch
+from types import ModuleType
+from unittest.mock import Mock, patch
 
-from backend.app.conversation_service import TargetCollegeIntent, chat
+from backend.app.conversation_service import (
+    TargetCollegeIntent,
+    _resolve_scorecard_target,
+    _translate_college_name_to_english,
+    chat,
+)
 
 
 class CollegeFirstConversationTests(unittest.TestCase):
@@ -53,6 +59,40 @@ class CollegeFirstConversationTests(unittest.TestCase):
         self.assertTrue(result["ready"])
         self.assertEqual(result["scenario"], "college_first")
         self.assertEqual(result["preferences"]["targets"], "University of Michigan-Ann Arbor")
+
+    def test_known_chinese_college_name_translates_without_model_call(self) -> None:
+        self.assertEqual(
+            _translate_college_name_to_english("密歇根大学"),
+            "University of Michigan-Ann Arbor",
+        )
+
+    def test_chinese_college_name_is_translated_then_fuzzy_matched(self) -> None:
+        candidates = [
+            {
+                "school.name": "University of Michigan-Ann Arbor",
+                "_match_score": 1.5,
+            },
+            {
+                "school.name": "University of Michigan-Flint",
+                "_match_score": 0.91,
+            },
+        ]
+        college_major = ModuleType("src.college_major")
+        college_major.UC_SYSTEM_ALIASES = {"uc"}
+        college_major.normalize_school_name = lambda value: " ".join(
+            "".join(character.lower() if character.isalnum() else " " for character in value).split()
+        )
+        college_major.search_school_candidates = Mock(return_value=candidates)
+        with patch(
+            "backend.app.conversation_service._translate_college_name_to_english",
+            return_value="University of Michigan Ann Arbour",
+        ), patch.dict("sys.modules", {"src.college_major": college_major}):
+            result = _resolve_scorecard_target("密西根大学安娜堡")
+
+        self.assertEqual(result, "University of Michigan-Ann Arbor")
+        college_major.search_school_candidates.assert_called_once_with(
+            "University of Michigan Ann Arbour", set()
+        )
 
     def test_unclear_answer_asks_for_clarification(self) -> None:
         session_id = self._start_college_first("zh")

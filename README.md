@@ -37,6 +37,13 @@ preference is optional or unrestricted.
 Fields of study may be entered in English or Chinese. A Chinese entry is converted
 to an English search term and shown for confirmation before matching.
 
+Target colleges may also be entered in English or Chinese. The web conversation
+flow translates Chinese school names to a likely official English name, then uses
+fuzzy matching against the College Scorecard catalog. Common Chinese names use
+deterministic aliases first. A match is accepted only when its score and lead over
+other candidates are strong enough; otherwise the user is asked to add a campus
+identifier or try another form of the name.
+
 ### What the results mean
 
 College facts come from the U.S. Department of Education's College Scorecard.
@@ -165,11 +172,13 @@ investors. Ownership alone does not determine academic quality. Students should
 also examine accreditation, total cost, graduation outcomes, credit transfer, and
 professional licensing requirements.
 
-#### Why must college names be entered in English?
+#### Can college names be entered in Chinese?
 
-College Scorecard uses official English institution names. Common abbreviations
-such as `UC` are supported, but English names remain the most reliable input.
-Fields of study can be entered in Chinese or English.
+Yes. The web conversation flow translates Chinese college names before fuzzy
+matching them against College Scorecard's official English catalog. English names
+and common abbreviations such as `UC` and `UMich` are also supported. If several
+campuses have similar names or the match is weak, the program asks for more detail
+instead of silently choosing one.
 
 ### Data and privacy
 
@@ -179,7 +188,8 @@ Fields of study can be entered in Chinese or English.
 - Interactive answers remain in memory for the current run and are not saved to a
   user-profile file.
 - Student context and preferences are sent to the configured Qwen API when a
-  recommendation is generated.
+  recommendation is generated. Chinese college names not covered by a local alias
+  may also be sent to Qwen for English-name translation before Scorecard matching.
 - `.env`, `.venv`, generated indexes, and the downloaded school catalog cache are
   excluded from Git.
 
@@ -240,6 +250,8 @@ College Guidance 是一个双语命令行大学申请辅助工具。它结合官
 多数条件可以多选。提示中注明“不限”或“可选”时，直接按 Enter 即可跳过。
 
 专业领域可以输入中文或英文。中文输入会先转换为英文搜索词，并在匹配前请用户确认。
+
+目标大学同样可以输入中文或英文。Web 对话会先把中文校名转换成可能的英文官方名称，再与 College Scorecard 院校目录进行模糊匹配。常见中文校名优先使用本地确定性映射；只有匹配分数足够高，并且明显优于其他候选学校时，系统才会接受结果。遇到同名、相似分校或低置信度结果时，系统会请用户补充分校信息或换一种写法，而不会直接猜测。
 
 ### 如何理解推荐结果
 
@@ -349,9 +361,9 @@ Experience 2: Computer Science Journey
 
 两者都属于私立学校。非营利学校会将盈余继续用于学校运营；营利学校可以向所有者或投资者分配利润。学校性质本身不能直接代表教学质量，学生还应比较认证、总费用、毕业情况、学分转移和职业执照要求。
 
-#### 为什么大学名称仍建议输入英文？
+#### 大学校名可以输入中文吗？
 
-College Scorecard 使用学校的英文官方名称。程序支持 `UC` 等常见缩写，但英文校名仍然最可靠。专业领域则可以输入中文或英文。
+可以。Web 对话会先翻译中文校名，再与 College Scorecard 的英文官方院校目录进行模糊匹配；英文校名以及 `UC`、`UMich` 等常见缩写也仍然支持。如果多个分校名称相似或匹配不够可靠，程序会要求补充信息，而不是直接选择其中一所。
 
 ### 数据与隐私
 
@@ -359,7 +371,7 @@ College Scorecard 使用学校的英文官方名称。程序支持 `UC` 等常�
 - 源文档保存在 `data/`；
 - 生成的 Chroma 索引保存在 `chroma/`；
 - 交互回答只在本次运行期间保存在内存中，不会写入用户档案；
-- 生成推荐时，学生背景和偏好会发送给所配置的 Qwen API；
+- 生成推荐时，学生背景和偏好会发送给所配置的 Qwen API；未被本地常用名称映射覆盖的中文校名，也可能发送给 Qwen 进行英文名称转换，再用于 Scorecard 匹配；
 - `.env`、`.venv`、生成的索引和下载的学校目录缓存不会提交到 Git。
 
 ### 项目结构
