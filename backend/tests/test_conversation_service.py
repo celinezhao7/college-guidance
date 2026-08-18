@@ -44,7 +44,7 @@ class CollegeFirstConversationTests(unittest.TestCase):
         self.assertEqual(result["scenario"], "explore")
         self.assertIn("don’t have a target college", result["reply"])
 
-         def test_target_prompt_respects_interface_language(self) -> None:
+    def test_target_prompt_respects_interface_language(self) -> None:
         english_first = chat(None, "test-profile", "en", "hi")
         english_prompt = chat(english_first["session_id"], "test-profile", "en", "1")
         self.assertIn("official English name", english_prompt["reply"])
@@ -72,7 +72,7 @@ class CollegeFirstConversationTests(unittest.TestCase):
         self.assertEqual(result["preferences"]["targets"], "University of Michigan-Ann Arbor")
 
         def test_chinese_target_is_resolved_to_scorecard_official_name(self) -> None:
-        session_id = self._start_college_first("zh")
+            session_id = self._start_college_first("zh")
 
         with patch(
             "backend.app.conversation_service._classify_target_college",
