@@ -12,6 +12,7 @@ import {
   type Profile,
   type RecommendationMode,
   type CollegePreferences,
+  type QuickReply,
 } from "@/lib/api"
 
 const defaultCollegePreferences: CollegePreferences = {
@@ -42,6 +43,7 @@ function App() {
   const [collegePreferences, setCollegePreferences] = useState(defaultCollegePreferences)
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [answeredPreferences, setAnsweredPreferences] = useState<string[]>([])
+  const [quickReplies, setQuickReplies] = useState<QuickReply[]>([])
   const scrollViewportRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -118,7 +120,7 @@ function App() {
                 ...message,
                 content:
                   language === "zh"
-                    ? `抱歉，无法生成推荐。${detail}`
+                    ? "抱歉，暂时无法生成推荐，请稍后重试。"
                     : `Sorry, I couldn't generate a recommendation. ${detail}`,
               }
             : message,
@@ -129,8 +131,9 @@ function App() {
     }
   }
 
-  async function handleCollegeMessage(message: string) {
+  async function handleCollegeMessage(message: string, choiceId?: string) {
     setMessages((previous) => [...previous, { role: "user", content: message }])
+    setQuickReplies([])
     setInput("")
     setIsStreaming(true)
     try {
@@ -139,10 +142,12 @@ function App() {
         profileId,
         language,
         message,
+        choiceId,
       })
       setSessionId(response.session_id)
       setCollegePreferences(response.preferences)
       setAnsweredPreferences(response.answered)
+      setQuickReplies(response.quick_replies)
       setMessages((previous) => [
         ...previous,
         { role: "assistant", content: response.reply },
@@ -179,7 +184,7 @@ function App() {
         ...previous,
         {
           role: "assistant",
-          content: language === "zh" ? `抱歉，出现错误：${detail}` : `Sorry, something went wrong: ${detail}`,
+          content: language === "zh" ? "抱歉，请求失败，请稍后重试。" : `Sorry, something went wrong: ${detail}`,
         },
       ])
     } finally {
@@ -191,6 +196,13 @@ function App() {
   const composerDisabled =
     controlsDisabled || Boolean(setupError) || !profileId || !modeId
   const zh = language === "zh"
+  const streamingStatus = zh
+    ? modeId === "college_field"
+      ? "正在查找符合条件的大学……"
+      : "正在生成推荐……"
+    : modeId === "college_field"
+      ? "Searching for colleges that match your preferences…"
+      : "Generating recommendation…"
 
   function handleLanguageChange(nextLanguage: "en" | "zh") {
     setLanguage(nextLanguage)
@@ -215,7 +227,12 @@ function App() {
     setMessages([])
     setSessionId(null)
     setAnsweredPreferences([])
+    setQuickReplies([])
     setCollegePreferences(defaultCollegePreferences)
+  }
+
+  function toggleMode(nextModeId: string) {
+    setModeId((currentModeId) => currentModeId === nextModeId ? "" : nextModeId)
   }
 
   return (
@@ -246,7 +263,7 @@ function App() {
                 </p>
                 {setupError && (
                   <p className="mt-3 text-sm text-red-600">
-                    {zh ? "无法连接后端：" : "Could not load the backend: "}{setupError}
+                    {zh ? "无法连接服务，请确认本地后端已启动后重试。" : `Could not load the backend: ${setupError}`}
                   </p>
                 )}
               </div>
@@ -255,7 +272,7 @@ function App() {
                   type="button"
                   aria-pressed={modeId === "college_field"}
                   disabled={controlsDisabled}
-                  onClick={() => setModeId("college_field")}
+                  onClick={() => toggleMode("college_field")}
                   className={`dream-mode-button ${modeId === "college_field" ? "is-active" : ""}`}
                 >
                   <Compass className="h-4.5 w-4.5" />
@@ -265,7 +282,7 @@ function App() {
                   type="button"
                   aria-pressed={modeId === "common_app"}
                   disabled={controlsDisabled}
-                  onClick={() => setModeId("common_app")}
+                  onClick={() => toggleMode("common_app")}
                   className={`dream-mode-button ${modeId === "common_app" ? "is-active" : ""}`}
                 >
                   <FilePenLine className="h-4.5 w-4.5" />
@@ -275,7 +292,7 @@ function App() {
                   type="button"
                   aria-pressed={modeId === "uc_piq"}
                   disabled={controlsDisabled}
-                  onClick={() => setModeId("uc_piq")}
+                  onClick={() => toggleMode("uc_piq")}
                   className={`dream-mode-button ${modeId === "uc_piq" ? "is-active" : ""}`}
                 >
                   <BookOpenText className="h-4.5 w-4.5" />
@@ -307,9 +324,7 @@ function App() {
                   ))}
                   {isStreaming && !messages.at(-1)?.content && (
                     <p className="text-sm text-zinc-500">
-                      {modeId === "college_field"
-                        ? (zh ? "正在查找符合条件的大学……" : "Searching for colleges that match your preferences…")
-                        : (zh ? "正在生成推荐……" : "Generating recommendation…")}
+                      {streamingStatus}
                     </p>
                   )}
                 </div>
@@ -323,6 +338,20 @@ function App() {
                     answered={answeredPreferences}
                     language={language}
                   />
+                )}
+                {modeId === "college_field" && quickReplies.length > 0 && !isStreaming && (
+                  <div className="mb-3 flex flex-wrap gap-2" aria-label={zh ? "快捷回答" : "Quick replies"}>
+                    {quickReplies.map((reply) => (
+                      <button
+                        key={reply.id}
+                        type="button"
+                        className="quick-reply"
+                        onClick={() => handleCollegeMessage(reply.label, reply.id)}
+                      >
+                        {reply.label}
+                      </button>
+                    ))}
+                  </div>
                 )}
                 <ChatComposer
                   input={input}
@@ -343,18 +372,36 @@ function App() {
 export default App
 
 function PreferenceSummary({ preferences, answered, language }: { preferences: CollegePreferences; answered: string[]; language: "en" | "zh" }) {
+  const zh = language === "zh"
+  const localizedValue = (value: string) => {
+    if (!zh) return value
+    return {
+      any: "不限",
+      either: "不限",
+      small: "小型",
+      medium: "中型",
+      large: "大型",
+      low: "较低",
+      high: "较高",
+      public: "公立",
+      private_nonprofit: "私立非营利",
+      private_for_profit: "私立营利",
+      university: "综合性大学",
+      liberal_arts: "文理学院",
+    }[value] ?? value
+  }
   const labels: Record<string, string> = {
     field: preferences.field,
-    states: preferences.states || (language === "zh" ? "州不限" : "Any state"),
-    max_cost: preferences.max_cost ? `$${preferences.max_cost.toLocaleString()}` : (language === "zh" ? "费用不限" : "No cost limit"),
-    size: preferences.size[0],
-    competition: preferences.competition[0],
-    sat: preferences.sat ? `SAT ${preferences.sat}` : (language === "zh" ? "未提供 SAT" : "SAT skipped"),
-    act: preferences.act ? `ACT ${preferences.act}` : (language === "zh" ? "未提供 ACT" : "ACT skipped"),
-    ownership: preferences.ownership[0],
-    institution_format: preferences.institution_format[0],
+    states: preferences.states || (zh ? "州不限" : "Any state"),
+    max_cost: preferences.max_cost ? `$${preferences.max_cost.toLocaleString()}` : (zh ? "费用不限" : "No cost limit"),
+    size: localizedValue(preferences.size[0]),
+    competition: localizedValue(preferences.competition[0]),
+    sat: preferences.sat ? `SAT ${preferences.sat}` : (zh ? "未提供 SAT" : "SAT skipped"),
+    act: preferences.act ? `ACT ${preferences.act}` : (zh ? "未提供 ACT" : "ACT skipped"),
+    ownership: localizedValue(preferences.ownership[0]),
+    institution_format: localizedValue(preferences.institution_format[0]),
     targets: preferences.targets,
-    count: language === "zh" ? `${preferences.count} 所学校` : `${preferences.count} schools`,
+    count: zh ? `${preferences.count} 所学校` : `${preferences.count} schools`,
   }
   return (
     <div className="mb-3 flex flex-wrap gap-2">

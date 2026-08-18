@@ -142,4 +142,47 @@
   .dream-chip {
     background: linear-gradient(110deg, rgba(225, 231, 247, 0.9), rgba(242, 226, 238, 0.8));
   }
+
+  .quick-reply {
+    --quick-start: rgba(239, 239, 249, 0.75);
+    --quick-end: rgba(242, 239, 248, 0.73);
+    display: inline-flex;
+    min-height: 2.65rem;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(205, 202, 220, 0.78);
+    border-radius: 999px;
+    background: linear-gradient(110deg, var(--quick-start), var(--quick-end));
+    padding: 0.6rem 1.1rem;
+    color: #5b5870;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+  }
+
+  .quick-reply:nth-child(2) {
+    --quick-start: rgba(242, 239, 248, 0.73);
+    --quick-end: rgba(246, 239, 246, 0.72);
+  }
+
+  .quick-reply:nth-child(3) {
+    --quick-start: rgba(246, 239, 246, 0.72);
+    --quick-end: rgba(249, 237, 232, 0.7);
+  }
+
+  .quick-reply:nth-child(4) {
+    --quick-start: rgba(249, 237, 232, 0.7);
+    --quick-end: rgba(250, 238, 229, 0.69);
+  }
+
+  .quick-reply:hover {
+    transform: translateY(-1px);
+    border-color: rgba(151, 143, 190, 0.9);
+    box-shadow: 0 5px 15px rgba(91, 80, 127, 0.08);
+  }
+
+  .quick-reply:focus-visible {
+    outline: 2px solid rgba(137, 130, 177, 0.7);
+    outline-offset: 2px;
+  }
 }

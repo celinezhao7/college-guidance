@@ -54,6 +54,12 @@ class ChatRequest(BaseModel):
     profile_id: str
     language: str = "en"
     message: str = ""
+    choice_id: str | None = None
+
+
+class QuickReply(BaseModel):
+    id: str
+    label: str
 
 
 class ChatResponse(BaseModel):
@@ -63,3 +69,4 @@ class ChatResponse(BaseModel):
     preferences: CollegePreferences
     answered: list[str]
     scenario: str | None = None
+    quick_replies: list[QuickReply] = Field(default_factory=list)

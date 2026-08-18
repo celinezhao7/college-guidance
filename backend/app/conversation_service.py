@@ -445,11 +445,104 @@ def _is_no(message: str) -> bool:
     return message.strip().lower() in {"no", "n", "nope", "不是", "不对"}
 
 
+CHOICE_VALUES = {
+    "scenario_college": "1",
+    "scenario_major": "2",
+    "scenario_explore": "3",
+    "field_yes": "yes",
+    "field_no": "no",
+    "skip": "skip",
+    "any": "any",
+    "size_small": "small",
+    "size_medium": "medium",
+    "size_large": "large",
+    "ownership_public": "public",
+    "ownership_nonprofit": "private nonprofit",
+    "ownership_for_profit": "private for profit",
+    "format_university": "university",
+    "format_liberal_arts": "liberal arts college",
+    "competition_low": "lower",
+    "competition_medium": "medium",
+    "competition_high": "higher",
+    "count_5": "5",
+    "count_10": "10",
+}
+
+
+def _quick_replies(conversation: Conversation) -> list[dict[str, str]]:
+    key = conversation.awaiting
+    language = conversation.language
+    labels = {
+        "en": {
+            "scenario_college": "I have a target college",
+            "scenario_major": "I have a target field",
+            "scenario_explore": "I’m unsure about both",
+            "no_target": "No target yet—help me explore",
+            "field_yes": "Yes",
+            "field_no": "No, I’ll re-enter it",
+            "skip": "Skip",
+            "any": "Any",
+            "size_small": "Small",
+            "size_medium": "Medium",
+            "size_large": "Large",
+            "ownership_public": "Public",
+            "ownership_nonprofit": "Private nonprofit",
+            "ownership_for_profit": "Private for-profit",
+            "format_university": "University",
+            "format_liberal_arts": "Liberal arts college",
+            "competition_low": "Lower",
+            "competition_medium": "Medium",
+            "competition_high": "Higher",
+            "count_5": "5 schools",
+            "count_10": "10 schools",
+        },
+        "zh": {
+            "scenario_college": "有目标大学",
+            "scenario_major": "有目标专业",
+            "scenario_explore": "两者都不确定",
+            "no_target": "还没有，帮我探索",
+            "field_yes": "是",
+            "field_no": "不是，我重新输入",
+            "skip": "跳过",
+            "any": "不限",
+            "size_small": "小型",
+            "size_medium": "中型",
+            "size_large": "大型",
+            "ownership_public": "公立",
+            "ownership_nonprofit": "私立非营利",
+            "ownership_for_profit": "私立营利",
+            "format_university": "综合性大学",
+            "format_liberal_arts": "文理学院",
+            "competition_low": "较低",
+            "competition_medium": "中等",
+            "competition_high": "较高",
+            "count_5": "5 所",
+            "count_10": "10 所",
+        },
+    }[language]
+    choices_by_question = {
+        "scenario": ["scenario_college", "scenario_major", "scenario_explore"],
+        "field_confirmation": ["field_yes", "field_no"],
+        "sat": ["skip"],
+        "act": ["skip"],
+        "states": ["any"],
+        "max_cost": ["any"],
+        "size": ["size_small", "size_medium", "size_large", "any"],
+        "ownership": ["ownership_public", "ownership_nonprofit", "ownership_for_profit", "any"],
+        "institution_format": ["format_university", "format_liberal_arts", "any"],
+        "competition": ["competition_low", "competition_medium", "competition_high", "any"],
+        "targets": ["no_target"],
+        "count": ["count_5", "count_10"],
+    }
+    return [{"id": choice, "label": labels[choice]} for choice in choices_by_question.get(key or "", [])]
+
+
 def chat(
     session_id: str | None,
     profile_id: str,
     language: str,
     message: str,
+    choice_id: str | None = None,
 ) -> dict:
     conversation = _conversations.get(session_id or "")
     if conversation is None:
@@ -461,6 +554,8 @@ def chat(
         _conversations[conversation.id] = conversation
     conversation.language = language if language in QUESTIONS else "en"
     conversation.preferences["language"] = conversation.language
+    if choice_id:
+        message = "none" if choice_id == "no_target" else CHOICE_VALUES.get(choice_id, message)
 
     if conversation.awaiting == "scenario":
         scenario = _parse_scenario(message)
@@ -495,7 +590,11 @@ def chat(
             )
     elif conversation.awaiting:
         if conversation.awaiting == "targets" and conversation.scenario == "college_first":
-            target_intent = _classify_target_college(message)
+            target_intent = (
+                TargetCollegeIntent("no_target", None, 1.0)
+                if choice_id == "no_target"
+                else _classify_target_college(message)
+            )
             if target_intent.confidence < 0.75 or target_intent.intent == "unclear":
                 reply = (
                     "I’m not sure whether you named a college or meant that you don’t have one yet. Please enter the college’s official English name, or say that you’d like help choosing one."
@@ -583,4 +682,5 @@ def _response(conversation: Conversation, reply: str, ready: bool = False) -> di
         "preferences": preferences,
         "answered": [key for key in MAJOR_FIRST_QUESTIONS if key in conversation.answered],
         "scenario": conversation.scenario,
+        "quick_replies": [] if ready else _quick_replies(conversation),
     }

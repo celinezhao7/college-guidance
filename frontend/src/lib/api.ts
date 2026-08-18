@@ -23,6 +23,11 @@ export type CollegePreferences = {
   count: number
 }
 
+export type QuickReply = {
+  id: string
+  label: string
+}
+
 type ProfilesResponse = { profiles: Profile[] }
 type ModesResponse = { modes: RecommendationMode[] }
 
@@ -101,6 +106,7 @@ export async function continueCollegeConversation(request: {
   profileId: string
   language: "en" | "zh"
   message: string
+  choiceId?: string
 }) {
   const response = await fetch("/api/chat", {
     method: "POST",
@@ -110,6 +116,7 @@ export async function continueCollegeConversation(request: {
       profile_id: request.profileId,
       language: request.language,
       message: request.message,
+      choice_id: request.choiceId,
     }),
   })
   if (!response.ok) {
@@ -123,5 +130,6 @@ export async function continueCollegeConversation(request: {
     preferences: CollegePreferences
     answered: string[]
     scenario: string | null
+    quick_replies: QuickReply[]
   }>
 }

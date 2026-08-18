@@ -35,7 +35,7 @@ Do not commit `.env`. Configure secrets in Render instead.
 
 1. Push the deployment commit to a private GitHub repository.
 2. In Render, choose **New → Blueprint** and connect the repository.
-3. Render reads `render.yaml` and creates `college-guidance-demo`.
+3. Render reads `render.yaml` and creates `college-guidance`.
 4. Enter these secret values when prompted:
    - `DASHSCOPE_API_KEY`
    - `COLLEGE_SCORECARD_API_KEY`

@@ -85,6 +85,28 @@ class CollegeFirstConversationTests(unittest.TestCase):
         self.assertNotEqual(result["preferences"]["targets"], "Imaginary University")
         self.assertIn("无法在 College Scorecard 中可靠确认", result["reply"])
 
+    def test_scenario_response_provides_structured_quick_replies(self) -> None:
+        result = chat(None, "test-profile", "zh", "hi")
+
+        self.assertEqual(
+            [reply["id"] for reply in result["quick_replies"]],
+            ["scenario_college", "scenario_major", "scenario_explore"],
+        )
+
+    def test_scenario_choice_id_does_not_depend_on_its_label(self) -> None:
+        first = chat(None, "test-profile", "zh", "hi")
+
+        result = chat(
+            first["session_id"],
+            "test-profile",
+            "zh",
+            "This label can change",
+            choice_id="scenario_college",
+        )
+
+        self.assertEqual(result["scenario"], "college_first")
+        self.assertEqual([reply["id"] for reply in result["quick_replies"]], ["no_target"])
+
 
 if __name__ == "__main__":
     unittest.main()

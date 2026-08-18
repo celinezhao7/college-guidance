@@ -76,6 +76,9 @@ export function Sidebar({
             disabled={disabled}
             onChange={(event) => onModeChange(event.target.value)}
           >
+            <option value="" disabled>
+              {zh ? "请选择推荐类型" : "Select a recommendation type"}
+            </option>
             {modes.map((mode) => (
               <option key={mode.id} value={mode.id}>
                 {language === "zh" ? mode.title_zh : mode.title_en}

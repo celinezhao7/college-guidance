@@ -132,6 +132,7 @@ def chat(request: ChatRequest) -> ChatResponse:
             profile_id=request.profile_id,
             language=request.language,
             message=request.message,
+            choice_id=request.choice_id,
         )
     )
 
