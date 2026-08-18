@@ -44,6 +44,17 @@ class CollegeFirstConversationTests(unittest.TestCase):
         self.assertEqual(result["scenario"], "explore")
         self.assertIn("don’t have a target college", result["reply"])
 
+         def test_target_prompt_respects_interface_language(self) -> None:
+        english_first = chat(None, "test-profile", "en", "hi")
+        english_prompt = chat(english_first["session_id"], "test-profile", "en", "1")
+        self.assertIn("official English name", english_prompt["reply"])
+        self.assertNotIn("Chinese name", english_prompt["reply"])
+
+        chinese_first = chat(None, "test-profile", "zh", "hi")
+        chinese_prompt = chat(chinese_first["session_id"], "test-profile", "zh", "1")
+        self.assertIn("中文或英文校名", chinese_prompt["reply"])
+        self.assertIn("先转换为英文", chinese_prompt["reply"])
+
     def test_target_name_uses_the_classified_college_name(self) -> None:
         session_id = self._start_college_first("en")
 
@@ -59,6 +70,25 @@ class CollegeFirstConversationTests(unittest.TestCase):
         self.assertTrue(result["ready"])
         self.assertEqual(result["scenario"], "college_first")
         self.assertEqual(result["preferences"]["targets"], "University of Michigan-Ann Arbor")
+
+        def test_chinese_target_is_resolved_to_scorecard_official_name(self) -> None:
+        session_id = self._start_college_first("zh")
+
+        with patch(
+            "backend.app.conversation_service._classify_target_college",
+            return_value=TargetCollegeIntent("target_college", "密歇根大学", 0.98),
+        ), patch(
+            "backend.app.conversation_service._resolve_scorecard_target",
+            return_value="University of Michigan-Ann Arbor",
+        ) as resolve:
+            result = chat(session_id, "test-profile", "zh", "我想看密歇根大学")
+
+        resolve.assert_called_once_with("密歇根大学")
+        self.assertTrue(result["ready"])
+        self.assertEqual(
+            result["preferences"]["targets"],
+            "University of Michigan-Ann Arbor",
+        )
 
     def test_known_chinese_college_name_translates_without_model_call(self) -> None:
         self.assertEqual(
