@@ -11,6 +11,8 @@ class HealthResponse(BaseModel):
 class ProfileResponse(BaseModel):
     id: str
     display_name: str
+    display_name_en: str
+    display_name_zh: str
 
 
 class ProfilesResponse(BaseModel):

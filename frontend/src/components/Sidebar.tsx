@@ -17,7 +17,7 @@ type SidebarProps = {
 }
 
 const selectClassName =
-  "w-full rounded-lg border border-[#dddce7] bg-white/75 px-3 py-2 text-sm shadow-[0_2px_10px_rgba(84,78,112,0.035)] outline-none transition focus:border-[#aaa6ca] focus:ring-2 focus:ring-[#b8b4d8]/20 disabled:opacity-50"
+  "h-10 w-full rounded-lg border border-[#dddce7] bg-white/75 px-3 py-2 text-sm shadow-[0_2px_10px_rgba(84,78,112,0.035)] outline-none transition focus:border-[#aaa6ca] focus:ring-2 focus:ring-[#b8b4d8]/20 disabled:opacity-50"
 
 export function Sidebar({
   profiles,
@@ -38,13 +38,13 @@ export function Sidebar({
         <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/70 text-[#5f5b82] shadow-sm">
           <GraduationCap className="h-4.5 w-4.5" />
         </div>
-        <span className="font-heading text-lg font-semibold tracking-tight text-[#3f3d58]">
+        <span className="font-heading text-xl font-semibold tracking-tight text-[#3f3d58]">
           CollegeGuide
         </span>
       </div>
       <Button
         variant="ghost"
-        className="justify-start gap-2 rounded-lg text-[#45445a] hover:bg-white/55 hover:text-[#343247]"
+        className="mx-1 h-10 justify-start gap-2 rounded-lg text-[#45445a] hover:bg-white/55 hover:text-[#343247]"
         onClick={onNewChat}
       >
         <Plus className="h-4 w-4" />
@@ -62,7 +62,7 @@ export function Sidebar({
           >
             {profiles.map((profile) => (
               <option key={profile.id} value={profile.id}>
-                {profile.display_name}
+                {zh ? profile.display_name_zh : profile.display_name_en}
               </option>
             ))}
           </select>

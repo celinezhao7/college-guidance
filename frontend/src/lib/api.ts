@@ -1,6 +1,8 @@
 export type Profile = {
   id: string
   display_name: string
+  display_name_en: string
+  display_name_zh: string
 }
 
 export type RecommendationMode = {

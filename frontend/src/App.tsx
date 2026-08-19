@@ -29,6 +29,9 @@ const defaultCollegePreferences: CollegePreferences = {
   count: 5,
 }
 
+type LoadingPhase = "conversation" | "recommendation" | null
+type CollegeScenario = "college_first" | "major_first" | "explore" | null
+
 function App() {
   const [input, setInput] = useState("")
   const [messages, setMessages] = useState<Message[]>([])
@@ -39,9 +42,11 @@ function App() {
   const [language, setLanguage] = useState<"en" | "zh">("en")
   const [isLoadingOptions, setIsLoadingOptions] = useState(true)
   const [isStreaming, setIsStreaming] = useState(false)
+  const [loadingPhase, setLoadingPhase] = useState<LoadingPhase>(null)
   const [setupError, setSetupError] = useState("")
   const [collegePreferences, setCollegePreferences] = useState(defaultCollegePreferences)
   const [sessionId, setSessionId] = useState<string | null>(null)
+  const [collegeScenario, setCollegeScenario] = useState<CollegeScenario>(null)
   const [answeredPreferences, setAnsweredPreferences] = useState<string[]>([])
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([])
   const scrollViewportRef = useRef<HTMLDivElement>(null)
@@ -89,6 +94,7 @@ function App() {
     ])
     setInput("")
     setIsStreaming(true)
+    setLoadingPhase("recommendation")
 
     try {
       await streamRecommendation(
@@ -127,6 +133,7 @@ function App() {
       )
     } finally {
       setIsStreaming(false)
+      setLoadingPhase(null)
     }
   }
 
@@ -135,6 +142,7 @@ function App() {
     setQuickReplies([])
     setInput("")
     setIsStreaming(true)
+    setLoadingPhase("conversation")
     try {
       const response = await continueCollegeConversation({
         sessionId,
@@ -144,6 +152,7 @@ function App() {
         choiceId,
       })
       setSessionId(response.session_id)
+      setCollegeScenario(response.scenario as CollegeScenario)
       setCollegePreferences(response.preferences)
       setAnsweredPreferences(response.answered)
       setQuickReplies(response.quick_replies)
@@ -153,6 +162,7 @@ function App() {
       ])
 
       if (response.ready) {
+        setLoadingPhase("recommendation")
         setMessages((previous) => [
           ...previous,
           { role: "assistant", content: "" },
@@ -188,6 +198,7 @@ function App() {
       ])
     } finally {
       setIsStreaming(false)
+      setLoadingPhase(null)
     }
   }
 
@@ -195,13 +206,30 @@ function App() {
   const composerDisabled =
     controlsDisabled || Boolean(setupError) || !profileId || !modeId
   const zh = language === "zh"
-  const streamingStatus = zh
-    ? modeId === "college_field"
-      ? "正在查找符合条件的大学……"
-      : "正在生成推荐……"
-    : modeId === "college_field"
-      ? "Searching for colleges that match your preferences…"
-      : "Generating recommendation…"
+  const streamingStatus = loadingPhase === "conversation"
+    ? zh ? "正在理解你的回答……" : "Processing your answer…"
+    : modeId !== "college_field"
+      ? zh ? "正在生成推荐……" : "Generating recommendation…"
+      : collegeScenario === "major_first"
+        ? zh ? "正在查找符合专业偏好的大学……" : "Finding colleges that match your field…"
+        : collegeScenario === "college_first"
+          ? zh ? "正在探索目标大学的相关专业领域……" : "Exploring fields of study at your target college…"
+          : collegeScenario === "explore"
+            ? zh ? "正在根据你的经历推荐专业领域……" : "Recommending fields of study based on your experiences…"
+            : zh ? "正在准备下一步……" : "Preparing the next step…"
+  const modeDescription = modeId
+    ? {
+        college_field: zh
+          ? "探索大学和宽泛的专业领域；我会一次问一个有用的问题。"
+          : "Explore colleges and broad fields of study. I’ll ask one useful question at a time.",
+        common_app: zh
+          ? "根据学生档案中的经历，找出最适合展开的三道 Common App 主文书题目。"
+          : "Find the three Common App prompts that best fit the student’s documented experiences.",
+        uc_piq: zh
+          ? "根据学生档案中的经历，找出最适合展现个人特质的四道 UC PIQ 题目。"
+          : "Find the four UC PIQ prompts that best showcase the student’s documented experiences.",
+      }[modeId]
+    : undefined
 
   function handleLanguageChange(nextLanguage: "en" | "zh") {
     setLanguage(nextLanguage)
@@ -226,6 +254,8 @@ function App() {
     setMessages([])
     setModeId("")
     setSessionId(null)
+    setCollegeScenario(null)
+    setLoadingPhase(null)
     setAnsweredPreferences([])
     setQuickReplies([])
     setCollegePreferences(defaultCollegePreferences)
@@ -276,7 +306,7 @@ function App() {
                   className={`dream-mode-button ${modeId === "college_field" ? "is-active" : ""}`}
                 >
                   <Compass className="h-4.5 w-4.5" />
-                  <span>{zh ? "大学与专业" : "Colleges & majors"}</span>
+                  <span>{zh ? "大学与专业领域" : "Colleges & fields of study"}</span>
                 </button>
                 <button
                   type="button"
@@ -299,9 +329,9 @@ function App() {
                   <span>{zh ? "UC PIQ 题目" : "UC PIQ prompts"}</span>
                 </button>
               </div>
-              {modeId === "college_field" && (
+              {modeDescription && (
                 <p className="mb-5 text-center text-sm text-zinc-500">
-                  {zh ? "直接告诉我你的目标，我会一次问一个问题。" : "Tell me your goal naturally. I’ll ask one useful question at a time."}
+                  {modeDescription}
                 </p>
               )}
               <ChatComposer
@@ -310,7 +340,7 @@ function App() {
                 onSend={handleSend}
                 disabled={composerDisabled}
                 requireInput
-                placeholder={zh ? "请输入关于大学、专业或申请的问题……" : "Ask about colleges, majors, or your application..."}
+                placeholder={zh ? "请输入关于大学、专业领域或申请的问题……" : "Ask about colleges, fields of study, or your application..."}
               />
             </div>
           </div>

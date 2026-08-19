@@ -13,6 +13,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 class StudentProfile:
     id: str
     display_name: str
+    display_name_en: str
+    display_name_zh: str
     filename: str
 
 
@@ -38,6 +40,11 @@ def list_profiles() -> list[StudentProfile]:
         "信息不足学生档案": 1,
         "兴趣模糊学生档案": 2,
     }
+    english_names = {
+        "完整学生档案": "Complete Student Profile",
+        "信息不足学生档案": "Limited-Information Student Profile",
+        "兴趣模糊学生档案": "Broad-Interest Student Profile",
+    }
     paths = sorted(
         directory.glob("*.docx"),
         key=lambda path: (
@@ -49,6 +56,8 @@ def list_profiles() -> list[StudentProfile]:
         StudentProfile(
             id=_profile_id(path.name),
             display_name=path.stem,
+            display_name_en=english_names.get(path.stem, path.stem),
+            display_name_zh=path.stem,
             filename=path.name,
         )
         for path in paths

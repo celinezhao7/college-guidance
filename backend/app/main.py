@@ -44,7 +44,12 @@ def health() -> HealthResponse:
 def profiles() -> ProfilesResponse:
     return ProfilesResponse(
         profiles=[
-            ProfileResponse(id=profile.id, display_name=profile.display_name)
+            ProfileResponse(
+                id=profile.id,
+                display_name=profile.display_name,
+                display_name_en=profile.display_name_en,
+                display_name_zh=profile.display_name_zh,
+            )
             for profile in list_profiles()
         ]
     )
