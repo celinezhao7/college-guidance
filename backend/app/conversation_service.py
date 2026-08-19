@@ -7,6 +7,8 @@ import os
 import re
 from uuid import uuid4
 
+from src.safety import SafetyAction, SafetyCategory, SafetyResult, validate_input
+
 
 logger = logging.getLogger(__name__)
 
@@ -784,6 +786,17 @@ def chat(
         _conversations[conversation.id] = conversation
     conversation.language = language if language in QUESTIONS else "en"
     conversation.preferences["language"] = conversation.language
+
+    safety = validate_input(message, "chat")
+    if not safety.allowed or safety.action is SafetyAction.REDACT:
+        if conversation.awaiting is None:
+            conversation.awaiting = _next_question(conversation)
+        return _response(
+            conversation,
+            _chat_safety_reply(safety, conversation.language),
+            naturalize=False,
+        )
+
     if choice_id:
         message = "none" if choice_id == "no_target" else CHOICE_VALUES.get(choice_id, message)
     conversation.last_user_message = message.strip()
@@ -921,12 +934,38 @@ def chat(
     return _response(conversation, ready_message, ready=True)
 
 
-def _response(conversation: Conversation, reply: str, ready: bool = False) -> dict:
+def _chat_safety_reply(result: SafetyResult, language: str) -> str:
+    if result.category is SafetyCategory.SELF_HARM:
+        return (
+            "我不能帮助伤害自己的请求。如果你可能立即伤害自己，请马上联系当地紧急服务或身边可信任的人。这个工具只能帮助你探索大学、专业和申请材料。"
+            if language == "zh"
+            else "I can’t help with requests to harm yourself. If you may act now, contact local emergency services or a trusted person immediately. This tool can only help with colleges, fields of study, and application materials."
+        )
+    if result.category is SafetyCategory.PII_SECRET:
+        return (
+            "为了保护隐私，请不要输入身份证件号码、银行卡信息、密码或 API 密钥。请删除这些信息后重新发送。"
+            if language == "zh"
+            else "For your privacy, don’t enter government ID numbers, payment-card details, passwords, or API keys. Remove that information and try again."
+        )
+    return (
+        "抱歉，我不能处理这条请求。这个工具只能帮助你探索大学、专业和申请材料。"
+        if language == "zh"
+        else "Sorry, I can’t help with that request. This tool is for exploring colleges, fields of study, and application materials."
+    )
+
+
+def _response(
+    conversation: Conversation,
+    reply: str,
+    ready: bool = False,
+    *,
+    naturalize: bool = True,
+) -> dict:
     preferences = dict(conversation.preferences)
     preferences.pop("language", None)
     return {
         "session_id": conversation.id,
-        "reply": _naturalize_reply(conversation, reply),
+        "reply": _naturalize_reply(conversation, reply) if naturalize else reply,
         "ready": ready,
         "preferences": preferences,
         "answered": [key for key in MAJOR_FIRST_QUESTIONS if key in conversation.answered],

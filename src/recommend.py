@@ -16,6 +16,7 @@ if __package__:
         stream_official_cip_field_recommendations,
     )
     from .i18n import choose_language, output_language_instruction, tr
+    from .safety import SafetyAction, SafetyCategory, validate_input
     from .student_profiles import choose_student_profile, list_student_profiles
 else:
     from college_major import (
@@ -26,6 +27,7 @@ else:
         stream_official_cip_field_recommendations,
     )
     from i18n import choose_language, output_language_instruction, tr
+    from safety import SafetyAction, SafetyCategory, validate_input
     from student_profiles import choose_student_profile, list_student_profiles
 
 
@@ -718,6 +720,29 @@ def stream_recommendation(
     college_preferences: dict | None = None,
     college_scenario: str | None = None,
 ):
+    safety = validate_input(query, "chat")
+    if not safety.allowed or safety.action is SafetyAction.REDACT:
+        reply_in_chinese = language == "zh" or bool(re.search(r"[\u4e00-\u9fff]", query))
+        if safety.category is SafetyCategory.SELF_HARM:
+            yield (
+                "我不能帮助伤害自己的请求。如果你可能立即伤害自己，请马上联系当地紧急服务或身边可信任的人。这个网站只能提供大学、专业和申请文书方面的帮助。"
+                if reply_in_chinese
+                else "I can’t help with requests to harm yourself. If you may act now, contact local emergency services or a trusted person immediately. This site can only help with colleges, fields of study, and application essays."
+            )
+        elif safety.category is SafetyCategory.PII_SECRET:
+            yield (
+                "为了保护隐私，请删除身份证件号码、银行卡信息、密码或 API 密钥后重新发送。"
+                if reply_in_chinese
+                else "For your privacy, remove government ID numbers, payment-card details, passwords, or API keys and try again."
+            )
+        else:
+            yield (
+                "抱歉，我不能处理这条请求。这个网站只能提供大学、专业和申请材料方面的帮助。"
+                if reply_in_chinese
+                else "Sorry, I can’t help with that request. This site is for college, field-of-study, and application-material guidance."
+            )
+        return
+
     llm = ChatOpenAI(
         model=os.getenv("QWEN_MODEL", "qwen3.5-plus"),
         api_key=os.getenv("DASHSCOPE_API_KEY"),

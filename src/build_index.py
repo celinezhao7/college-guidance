@@ -10,8 +10,10 @@ from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
 
 if __package__:
+    from .safety import SafetyCategory, validate_input
     from .student_profiles import get_student_profile_dir, list_student_profiles
 else:
+    from safety import SafetyCategory, validate_input
     from student_profiles import get_student_profile_dir, list_student_profiles
 
 
@@ -172,6 +174,17 @@ def load_student_documents(profile_path: Path):
     chunks = split_by_separator(text)
 
     for index, chunk in enumerate(chunks):
+        safety = validate_input(chunk, "student_kb")
+        if safety.category not in {
+            SafetyCategory.SAFE,
+            SafetyCategory.SENSITIVE_ALLOWED,
+        }:
+            print(
+                "SAFETY: skipped student chunk "
+                f"{profile_path.name} #{index} [{safety.category.value}]: "
+                f"{safety.reason}"
+            )
+            continue
         documents.append(
             Document(
                 page_content=chunk,
@@ -180,6 +193,8 @@ def load_student_documents(profile_path: Path):
                     "type": "student_evidence",
                     "chunk_index": index,
                     "chunk_role": classify_student_chunk(chunk),
+                    "safety_category": safety.category.value,
+                    "safety_action": safety.action.value,
                 },
             )
         )
