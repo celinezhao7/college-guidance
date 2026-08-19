@@ -3,7 +3,9 @@ from types import ModuleType
 from unittest.mock import Mock, patch
 
 from backend.app.conversation_service import (
+    Conversation,
     TargetCollegeIntent,
+    _naturalize_reply,
     _resolve_scorecard_target,
     _translate_college_name_to_english,
     chat,
@@ -30,6 +32,35 @@ class CollegeFirstConversationTests(unittest.TestCase):
         self.assertEqual(result["scenario"], "explore")
         self.assertNotIn("不知道欸", result["preferences"].get("targets", ""))
         self.assertIn("没有目标大学", result["reply"])
+
+    def test_greeting_gets_a_natural_scenario_prompt(self) -> None:
+        result = chat(None, "test-profile", "zh", "你好")
+
+        self.assertTrue(result["reply"].startswith("你好！"))
+        self.assertIn("探索方向", result["reply"])
+        self.assertNotIn("1）", result["reply"])
+        self.assertEqual(
+            [reply["id"] for reply in result["quick_replies"]],
+            ["scenario_college", "scenario_major", "scenario_explore"],
+        )
+
+    def test_response_layer_receives_actual_user_wording(self) -> None:
+        with patch(
+            "backend.app.conversation_service._naturalize_reply",
+            side_effect=lambda conversation, draft: (
+                f"user={conversation.last_user_message}; draft={draft}"
+            ),
+        ):
+            result = chat(None, "test-profile", "en", "hiiii")
+
+        self.assertIn("user=hiiii", result["reply"])
+        self.assertIn("choose a direction", result["reply"])
+
+    def test_natural_reply_falls_back_without_api_key(self) -> None:
+        conversation = Conversation("session", "profile", "en")
+        conversation.last_user_message = "hiiii"
+        with patch.dict("os.environ", {"DASHSCOPE_API_KEY": ""}):
+            self.assertEqual(_naturalize_reply(conversation, "Safe draft"), "Safe draft")
 
     def test_english_not_sure_switches_to_exploration(self) -> None:
         session_id = self._start_college_first("en")
@@ -122,6 +153,32 @@ class CollegeFirstConversationTests(unittest.TestCase):
         self.assertEqual(result, "University of Michigan-Ann Arbor")
         college_major.search_school_candidates.assert_called_once_with(
             "University of Michigan Ann Arbour", set()
+        )
+
+    def test_uc_campus_shorthand_is_expanded_before_matching(self) -> None:
+        candidates = [
+            {
+                "school.name": "University of California-Berkeley",
+                "_match_score": 1.5,
+            },
+            {
+                "school.name": "Berkeley College-Woodland Park",
+                "_match_score": 0.72,
+            },
+        ]
+        college_major = ModuleType("src.college_major")
+        college_major.UC_SYSTEM_ALIASES = {"uc", "uc schools", "university of california"}
+        college_major.normalize_school_name = lambda value: " ".join(
+            "".join(character.lower() if character.isalnum() else " " for character in value).split()
+        )
+        college_major.search_school_candidates = Mock(return_value=candidates)
+
+        with patch.dict("sys.modules", {"src.college_major": college_major}):
+            result = _resolve_scorecard_target("uc berkeley")
+
+        self.assertEqual(result, "University of California-Berkeley")
+        college_major.search_school_candidates.assert_called_once_with(
+            "University of California berkeley", set()
         )
 
     def test_unclear_answer_asks_for_clarification(self) -> None:

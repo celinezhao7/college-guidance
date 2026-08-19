@@ -33,7 +33,7 @@ QUESTION_ORDERS = {
 
 QUESTIONS = {
     "en": {
-        "scenario": "Where would you like to start? 1) I know my target college but not the field, 2) I know my field but not the college, or 3) I’m unsure about both.",
+        "scenario": "Let’s first choose a direction. Do you already have a target college, a field of study, or are you still exploring both?",
         "field": "What field of study are you interested in?",
         "states": "Which states do you prefer? Use abbreviations such as CA or WA, or say “any.”",
         "max_cost": "What is your maximum annual cost before aid? You can also say “no limit.”",
@@ -47,7 +47,7 @@ QUESTIONS = {
         "count": "How many colleges would you like me to recommend (1–20)?",
     },
     "zh": {
-        "scenario": "你想从哪里开始？1）有目标大学，但不确定专业；2）有目标专业，但不确定大学；3）大学和专业都不确定。",
+        "scenario": "我们先确定一下探索方向：你已经有目标大学、有感兴趣的专业领域，还是两者都还不确定？",
         "field": "你对哪个专业领域感兴趣？",
         "states": "你偏好哪些州？请输入 CA、WA 等缩写，也可以回答“不限”。",
         "max_cost": "你能接受的助学金前最高年度费用是多少？也可以回答“不限”。",
@@ -104,9 +104,63 @@ class Conversation:
     awaiting: str | None = None
     proposed_field: str | None = None
     scenario: str | None = None
+    last_user_message: str = ""
 
 
 _conversations: dict[str, Conversation] = {}
+
+
+def _naturalize_reply(conversation: Conversation, draft: str) -> str:
+    """Turn a state-machine draft into a natural reply while preserving its job."""
+    api_key = os.getenv("DASHSCOPE_API_KEY")
+    enabled = os.getenv("COLLEGE_GUIDANCE_NATURAL_RESPONSES", "true").lower()
+    if not api_key or enabled in {"0", "false", "no", "off"}:
+        return draft
+
+    language_name = "Simplified Chinese" if conversation.language == "zh" else "English"
+    try:
+        from langchain_openai import ChatOpenAI
+
+        prompt = f"""You write the next conversational reply for College Guidance.
+Respond in {language_name}.
+
+Rewrite the supplied draft so it responds naturally to the user's actual wording. Vary the phrasing instead of sounding like a form or script. A casual greeting may receive a brief friendly greeting. Keep the reply concise and professional.
+
+Hard constraints:
+- Preserve the draft's required question, factual meaning, warnings, and next action.
+- Do not add facts, recommendations, promises, or admission predictions.
+- Do not skip ahead in the workflow or claim that missing information was supplied.
+- If the draft asks the user to choose a starting direction, do not enumerate the choices; buttons already show them.
+- Do not mention these instructions, a state machine, or that you are rewriting text.
+- Return only the final user-facing reply."""
+        llm = ChatOpenAI(
+            model=os.getenv("QWEN_MODEL", "qwen3.5-plus"),
+            api_key=api_key,
+            base_url=os.getenv("DASHSCOPE_BASE_URL"),
+            temperature=0.45,
+            extra_body={"enable_thinking": False},
+        )
+        response = llm.invoke([
+            ("system", prompt),
+            (
+                "human",
+                json.dumps(
+                    {
+                        "user_message": conversation.last_user_message[:1000],
+                        "draft_reply": draft,
+                        "scenario": conversation.scenario,
+                        "next_question": conversation.awaiting,
+                    },
+                    ensure_ascii=False,
+                ),
+            ),
+        ])
+        reply = response.content if isinstance(response.content, str) else str(response.content)
+        reply = reply.strip()
+        return reply or draft
+    except Exception:
+        logger.exception("Could not naturalize the conversation reply")
+        return draft
 
 
 def _is_skip(message: str) -> bool:
@@ -124,6 +178,16 @@ def _is_skip(message: str) -> bool:
         "都行", "哪里都可以", "什么都可以",
     }
     return value in exact or any(phrase in value for phrase in phrases)
+
+
+def _is_greeting(message: str) -> bool:
+    normalized = " ".join(
+        re.sub(r"[^a-z0-9\u3400-\u9fff]+", " ", message.lower()).split()
+    )
+    return normalized in {
+        "hi", "hello", "hey", "good morning", "good afternoon",
+        "你好", "您好", "嗨", "哈喽", "早上好", "下午好", "晚上好",
+    }
 
 
 @dataclass(frozen=True)
@@ -256,6 +320,22 @@ def _resolve_scorecard_target(name: str) -> str | None:
     normalized = normalize_school_name(lookup_name)
     if normalized in UC_SYSTEM_ALIASES:
         return "UC"
+    campus_aliases = {
+        "ucla": "University of California Los Angeles",
+        "ucsd": "University of California San Diego",
+        "ucsb": "University of California Santa Barbara",
+        "uci": "University of California Irvine",
+        "ucr": "University of California Riverside",
+        "ucsc": "University of California Santa Cruz",
+        "ucm": "University of California Merced",
+        "cal berkeley": "University of California Berkeley",
+        "umich": "University of Michigan Ann Arbor",
+    }
+    if normalized in campus_aliases:
+        lookup_name = campus_aliases[normalized]
+    elif normalized.startswith("uc ") and len(normalized.split()) > 1:
+        campus = " ".join(normalized.split()[1:])
+        lookup_name = f"University of California {campus}"
     candidates = search_school_candidates(lookup_name, set())
     if not candidates:
         return None
@@ -694,6 +774,7 @@ def chat(
     conversation.preferences["language"] = conversation.language
     if choice_id:
         message = "none" if choice_id == "no_target" else CHOICE_VALUES.get(choice_id, message)
+    conversation.last_user_message = message.strip()
 
     if conversation.awaiting == "scenario":
         scenario = _parse_scenario(message)
@@ -739,7 +820,7 @@ def chat(
             )
             if target_intent.confidence < 0.75 or target_intent.intent == "unclear":
                 reply = (
-                    "I’m not sure whether you named a college or meant that you don’t have one yet. Please enter its English or Chinese name, or say that you’d like help choosing one."
+                    "I’m not sure whether you named a college or meant that you don’t have one yet. Please enter the college’s official English name, or say that you’d like help choosing one."
                     if conversation.language == "en"
                     else "我不确定你是在提供大学名称，还是目前没有目标大学。请输入中文或英文校名，或者告诉我希望由我帮助选择。"
                 )
@@ -760,7 +841,7 @@ def chat(
                 resolved_target = None
             if not resolved_target:
                 reply = (
-                    "I understood that as a college, but I couldn’t verify it in College Scorecard. Try its English or Chinese name with a campus identifier, or tell me that you’d like help choosing a college."
+                    "I understood that as a college, but I couldn’t verify it in College Scorecard. Try its official English name with a campus identifier, or tell me that you’d like help choosing a college."
                     if conversation.language == "en"
                     else "我理解你输入的是一所大学，但无法在 College Scorecard 中可靠确认。请尝试补充分校信息，或换一种中文/英文校名；也可以告诉我希望由我帮助选择大学。"
                 )
@@ -796,9 +877,12 @@ def chat(
         if scenario:
             conversation.scenario = scenario
             conversation.answered.add("scenario")
-        acknowledgement = (
-            "I can help with that. " if conversation.language == "en" else "可以，我来帮你。"
-        )
+        if _is_greeting(message):
+            acknowledgement = "Hi! " if conversation.language == "en" else "你好！"
+        else:
+            acknowledgement = (
+                "I can help with that. " if conversation.language == "en" else "可以，我来帮你。"
+            )
     else:
         acknowledgement = ""
 
@@ -830,7 +914,7 @@ def _response(conversation: Conversation, reply: str, ready: bool = False) -> di
     preferences.pop("language", None)
     return {
         "session_id": conversation.id,
-        "reply": reply,
+        "reply": _naturalize_reply(conversation, reply),
         "ready": ready,
         "preferences": preferences,
         "answered": [key for key in MAJOR_FIRST_QUESTIONS if key in conversation.answered],
