@@ -16,7 +16,16 @@ if __package__:
         stream_official_cip_field_recommendations,
     )
     from .i18n import choose_language, output_language_instruction, tr
-    from .safety import SafetyAction, SafetyCategory, validate_input
+    from .request_preferences import (
+        explicitly_requested_mode,
+        requested_recommendation_count,
+    )
+    from .safety import (
+        SafetyAction,
+        SafetyCategory,
+        guarded_output_stream,
+        validate_input,
+    )
     from .student_profiles import choose_student_profile, list_student_profiles
 else:
     from college_major import (
@@ -27,7 +36,8 @@ else:
         stream_official_cip_field_recommendations,
     )
     from i18n import choose_language, output_language_instruction, tr
-    from safety import SafetyAction, SafetyCategory, validate_input
+    from request_preferences import explicitly_requested_mode, requested_recommendation_count
+    from safety import SafetyAction, SafetyCategory, guarded_output_stream, validate_input
     from student_profiles import choose_student_profile, list_student_profiles
 
 
@@ -200,7 +210,7 @@ When referring to a student experience:
 
 # TASK
 
-Your task is to recommend the 4 UC Personal Insight Questions
+Your task is to recommend the requested number of UC Personal Insight Questions
 that are best supported by the student's documented experiences.
 
 Use the retrieved UC guidance to understand the purpose of the PIQs
@@ -226,7 +236,7 @@ about the student.
 5. Prefer PIQs supported by concrete actions, impact,
    reflection, or personal growth.
 
-6. Consider the four PIQs as a portfolio, not only as four
+6. When recommending more than one PIQ, consider the selected PIQs as a portfolio, not only as
    independent recommendations.
 
    Prefer a set that reveals different meaningful dimensions
@@ -274,9 +284,9 @@ Distinctiveness:
 Does this PIQ add something different from the other
 recommended PIQs?
 
-Choose the 4 PIQs with the strongest overall support.
+Choose the requested number of PIQs with the strongest overall support.
 
-Before finalizing the four recommendations, compare the
+Before finalizing multiple recommendations, compare the
 strongest non-selected PIQ with the weakest selected PIQ.
 
 If the non-selected PIQ has comparable evidence strength
@@ -353,13 +363,13 @@ If the existing evidence is sufficient, say:
 
 "No major evidence gap."
 
-After all four recommendations:
+After all recommendations, when more than one was requested:
 
 Why These Four:
 
 Briefly explain:
 
-- what different aspects of the student these four PIQs reveal
+- what different aspects of the student the selected PIQs reveal
 - whether there is meaningful thematic or experience overlap
 - why this combination is stronger as a set than other plausible combinations
 
@@ -410,7 +420,7 @@ When referring to a student experience:
 
 # TASK
 
-Recommend the 3 Common App essay prompts that are best supported
+Recommend the requested number of Common App essay prompts that are best supported
 by the student's documented experiences.
 
 Then identify ONE Best Overall Choice.
@@ -513,16 +523,13 @@ or an activities list?
 
 # SELECTION
 
-Choose the 3 prompts with the strongest overall support.
+Choose the requested number of prompts with the strongest overall support.
 
-Rank them:
-
-1. Best Overall Choice
-2. Strong Alternative
-3. Additional Alternative
+Rank them from strongest to weakest. Rank #1 is the Best Overall Choice;
+any remaining recommendations are alternatives.
 
 Do not force variety simply for the sake of choosing
-three different types of stories.
+different types of stories.
 
 However, if two prompts are similarly strong, prefer the one
 that gives the student a more natural and meaningful way to
@@ -573,7 +580,7 @@ If the existing evidence is sufficient, say:
 
 # OUTPUT
 
-For each of the 3 recommendations:
+For each recommendation:
 
 Rank #[number]
 
@@ -623,7 +630,7 @@ If the existing evidence is sufficient, say:
 
 "No major evidence gap."
 
-After all three recommendations:
+After all recommendations, when more than one was requested:
 
 # Best Overall Choice
 
@@ -743,6 +750,20 @@ def stream_recommendation(
             )
         return
 
+    requested_mode = explicitly_requested_mode(query)
+    if (
+        application_type in {"uc", "common_app"}
+        and requested_mode is not None
+        and requested_mode != application_type
+    ):
+        reply_in_chinese = language == "zh" or bool(re.search(r"[\u4e00-\u9fff]", query))
+        yield (
+            "你当前选择的功能与请求不一致。请切换到 UC PIQ 或 Common App 对应的功能后再试。"
+            if reply_in_chinese
+            else "Your request doesn’t match the selected tool. Switch to the corresponding UC PIQ or Common App tool and try again."
+        )
+        return
+
     llm = ChatOpenAI(
         model=os.getenv("QWEN_MODEL", "qwen3.5-plus"),
         api_key=os.getenv("DASHSCOPE_API_KEY"),
@@ -758,25 +779,40 @@ def stream_recommendation(
     if application_type == "college_major":
         student_context = get_all_student_context(profile_name)
         if college_scenario == "college_first" and college_preferences:
-            yield from stream_majors_at_target_colleges(
-                llm,
-                student_context,
-                college_preferences.get("targets", ""),
-                language,
+            yield from guarded_output_stream(
+                stream_majors_at_target_colleges(
+                    llm,
+                    student_context,
+                    college_preferences.get("targets", ""),
+                    language,
+                ),
+                application_type=application_type,
+                language=language,
+                reference_text=student_context,
             )
             return
         if college_scenario == "major_first" and college_preferences:
-            yield from stream_college_recommendations(
-                llm,
-                student_context,
-                college_preferences,
-                language,
+            yield from guarded_output_stream(
+                stream_college_recommendations(
+                    llm,
+                    student_context,
+                    college_preferences,
+                    language,
+                ),
+                application_type=application_type,
+                language=language,
+                reference_text=student_context,
             )
             return
-        yield from stream_official_cip_field_recommendations(
-            llm,
-            student_context,
-            language,
+        yield from guarded_output_stream(
+            stream_official_cip_field_recommendations(
+                llm,
+                student_context,
+                language,
+            ),
+            application_type=application_type,
+            language=language,
+            reference_text=student_context,
         )
         return
 
@@ -795,6 +831,20 @@ def stream_recommendation(
 
     else:
         raise ValueError(f"Unsupported application type: {application_type}")
+
+    recommendation_count = requested_recommendation_count(query, application_type)
+    selected_mode_name = "UC PIQ" if application_type == "uc" else "Common App"
+    system_prompt += f"""
+
+# REQUESTED COUNT AND SELECTED MODE
+
+The selected tool is {selected_mode_name}. Do not output recommendations from the
+other application system. Recommend exactly {recommendation_count} prompt(s).
+If exactly one recommendation was requested, output only that single recommendation
+and its supporting analysis. Do not add a redundant Best Overall Choice, portfolio comparison, or
+Why Not the Other Prompts section. If more than one was requested, rank exactly
+{recommendation_count} recommendations from strongest to weakest.
+"""
 
     system_prompt += """
 
@@ -831,7 +881,7 @@ with the recommendation task normally.
 
 {query}
 
-Recommend the 4 best-supported UC PIQs for this student.
+Recommend exactly {recommendation_count} best-supported UC PIQ(s) for this student.
 """
     else:
         user_prompt = f"""
@@ -847,18 +897,26 @@ Recommend the 4 best-supported UC PIQs for this student.
 
 {query}
 
-Recommend the 3 best-supported Common App essay prompts
+Recommend exactly {recommendation_count} best-supported Common App essay prompt(s)
 for this student and identify the Best Overall Choice.
 """
 
-    for chunk in llm.stream(
-        [
-            ("system", system_prompt),
-            ("user", user_prompt),
-        ]
-    ):
-        if chunk.content:
-            yield chunk.content
+    raw_chunks = (
+        chunk.content
+        for chunk in llm.stream(
+            [
+                ("system", system_prompt),
+                ("user", user_prompt),
+            ]
+        )
+        if chunk.content
+    )
+    yield from guarded_output_stream(
+        raw_chunks,
+        application_type=application_type,
+        language=language,
+        reference_text=student_context,
+    )
 # ============================================================
 # Main
 # ============================================================

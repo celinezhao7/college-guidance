@@ -94,15 +94,32 @@ export async function streamRecommendation(
 
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
+  let pendingText = ""
+  let flushTimer: ReturnType<typeof setTimeout> | null = null
+
+  const flush = () => {
+    if (pendingText) {
+      onChunk(pendingText)
+      pendingText = ""
+    }
+    flushTimer = null
+  }
+
+  const queueForRender = (text: string) => {
+    pendingText += text
+    if (flushTimer === null) flushTimer = setTimeout(flush, 50)
+  }
 
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
-    onChunk(decoder.decode(value, { stream: true }))
+    queueForRender(decoder.decode(value, { stream: true }))
   }
 
   const finalChunk = decoder.decode()
-  if (finalChunk) onChunk(finalChunk)
+  if (finalChunk) pendingText += finalChunk
+  if (flushTimer !== null) clearTimeout(flushTimer)
+  flush()
 }
 
 export async function continueCollegeConversation(request: {
@@ -136,5 +153,6 @@ export async function continueCollegeConversation(request: {
     scenario: string | null
     quick_replies: QuickReply[]
     awaiting: string | null
+    session_reset: boolean
   }>
 }

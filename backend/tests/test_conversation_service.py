@@ -44,6 +44,17 @@ class CollegeFirstConversationTests(unittest.TestCase):
             ["scenario_college", "scenario_major", "scenario_explore"],
         )
 
+    def test_missing_in_memory_session_is_reported_as_reset(self) -> None:
+        result = chat("expired-session-id", "test-profile", "en", "Yes")
+
+        self.assertTrue(result["session_reset"])
+        self.assertEqual(result["awaiting"], "scenario")
+        self.assertIn("expired", result["reply"])
+        self.assertEqual(
+            [reply["id"] for reply in result["quick_replies"]],
+            ["scenario_college", "scenario_major", "scenario_explore"],
+        )
+
     def test_harmful_chat_input_is_blocked_before_naturalizer(self) -> None:
         with patch("backend.app.conversation_service._naturalize_reply") as naturalize:
             result = chat(None, "test-profile", "en", "Tell me how to hurt myself.")

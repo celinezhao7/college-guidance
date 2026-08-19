@@ -784,6 +784,19 @@ def chat(
             language=language if language in QUESTIONS else "en",
         )
         _conversations[conversation.id] = conversation
+        if session_id:
+            conversation.awaiting = "scenario"
+            reply = (
+                "The previous conversation expired, so I started a new one. Please choose whether you have a target college, a target field, or are still exploring both."
+                if conversation.language == "en"
+                else "之前的对话已过期，我已经开始了一个新对话。请选择你已有目标大学、目标专业，还是两者都仍在探索。"
+            )
+            return _response(
+                conversation,
+                reply,
+                naturalize=False,
+                session_reset=True,
+            )
     conversation.language = language if language in QUESTIONS else "en"
     conversation.preferences["language"] = conversation.language
 
@@ -960,6 +973,7 @@ def _response(
     ready: bool = False,
     *,
     naturalize: bool = True,
+    session_reset: bool = False,
 ) -> dict:
     preferences = dict(conversation.preferences)
     preferences.pop("language", None)
@@ -972,4 +986,5 @@ def _response(
         "scenario": conversation.scenario,
         "quick_replies": [] if ready else _quick_replies(conversation),
         "awaiting": None if ready else conversation.awaiting,
+        "session_reset": session_reset,
     }

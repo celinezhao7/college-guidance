@@ -220,7 +220,7 @@
   height: 20px;
   border: 3px solid white;
   border-radius: 9999px;
-  background: #27272a;
+  background: #6f6a92;
   box-shadow: 0 0 0 1px #a1a1aa, 0 1px 3px rgb(0 0 0 / 0.2);
   cursor: grab;
   pointer-events: auto;
@@ -230,8 +230,59 @@
   height: 14px;
   border: 3px solid white;
   border-radius: 9999px;
-  background: #27272a;
+  background: #6f6a92;
   box-shadow: 0 0 0 1px #a1a1aa, 0 1px 3px rgb(0 0 0 / 0.2);
   cursor: grab;
   pointer-events: auto;
+}
+
+.admission-range-fill {
+  background: linear-gradient(90deg, #69749d, #8a6f91);
+}
+
+.dream-loading-text {
+  background: linear-gradient(90deg, #6f6a92 20%, #a28ba4 48%, #6f6a92 76%);
+  background-size: 220% 100%;
+  background-clip: text;
+  color: transparent;
+  animation: dream-loading-shimmer 1.8s ease-in-out infinite;
+}
+
+.dream-loading-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.22rem;
+}
+
+.dream-loading-dots span {
+  width: 0.3rem;
+  height: 0.3rem;
+  border-radius: 999px;
+  background: #817a9f;
+  animation: dream-loading-dot 1.15s ease-in-out infinite;
+}
+
+.dream-loading-dots span:nth-child(2) {
+  animation-delay: 0.14s;
+}
+
+.dream-loading-dots span:nth-child(3) {
+  animation-delay: 0.28s;
+}
+
+@keyframes dream-loading-shimmer {
+  0%, 100% { background-position: 100% 50%; }
+  50% { background-position: 0% 50%; }
+}
+
+@keyframes dream-loading-dot {
+  0%, 60%, 100% { opacity: 0.35; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-0.2rem); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dream-loading-text,
+  .dream-loading-dots span {
+    animation: none;
+  }
 }

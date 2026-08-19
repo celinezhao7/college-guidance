@@ -86,6 +86,26 @@ function App() {
     const isCollegeMode = modeId === "college_field"
     if (!trimmedInput || !profileId || !modeId || isStreaming) return
 
+    if (!isCollegeMode && isCasualGreeting(trimmedInput)) {
+      const replyInChinese = language === "zh" || /[\u4e00-\u9fff]/.test(trimmedInput)
+      setMessages((previous) => [
+        ...previous,
+        { role: "user", content: trimmedInput },
+        {
+          role: "assistant",
+          content: modeId === "common_app"
+            ? (replyInChinese
+                ? "你好！这个功能可以根据学生档案推荐 Common App 主文书题目。告诉我你希望获得什么帮助吧。"
+                : "Hi! This tool recommends Common App essay prompts based on the student profile. Tell me what you’d like help with.")
+            : (replyInChinese
+                ? "你好！这个功能可以根据学生档案推荐 UC PIQ 题目。告诉我你希望获得什么帮助吧。"
+                : "Hi! This tool recommends UC PIQ prompts based on the student profile. Tell me what you’d like help with."),
+        },
+      ])
+      setInput("")
+      return
+    }
+
     const casualReply = getCasualFeedbackReply(trimmedInput, language)
     if (casualReply) {
       setMessages((previous) => [
@@ -184,6 +204,10 @@ function App() {
       setAnsweredPreferences(response.answered)
       setQuickReplies(response.quick_replies)
       setAwaitingPreference(response.awaiting)
+      if (response.session_reset) {
+        setMessages([{ role: "assistant", content: response.reply }])
+        return
+      }
       setMessages((previous) => [
         ...previous,
         { role: "assistant", content: response.reply },
@@ -250,11 +274,11 @@ function App() {
           ? "探索大学和宽泛的专业领域；我会一次问一个有用的问题。"
           : "Explore colleges and broad fields of study. I’ll ask one useful question at a time.",
         common_app: zh
-          ? "根据学生档案中的经历，找出最适合展开的三道 Common App 主文书题目。"
-          : "Find the three Common App prompts that best fit the student’s documented experiences.",
+          ? "根据学生档案中的经历，按你需要的数量推荐最适合展开的 Common App 主文书题目。"
+          : "Recommend the requested number of Common App prompts that best fit the student’s documented experiences.",
         uc_piq: zh
-          ? "根据学生档案中的经历，找出最适合展现个人特质的四道 UC PIQ 题目。"
-          : "Find the four UC PIQ prompts that best showcase the student’s documented experiences.",
+          ? "根据学生档案中的经历，按你需要的数量推荐最适合展现个人特质的 UC PIQ 题目。"
+          : "Recommend the requested number of UC PIQ prompts that best showcase the student’s documented experiences.",
       }[modeId]
     : undefined
 
@@ -381,9 +405,7 @@ function App() {
                     <ChatMessage key={index} message={message} />
                   ))}
                   {isStreaming && !messages.at(-1)?.content && (
-                    <p className="text-sm text-zinc-500">
-                      {streamingStatus}
-                    </p>
+                    <LoadingStatus label={streamingStatus} />
                   )}
                 </div>
               </div>
@@ -436,6 +458,21 @@ function App() {
 
 export default App
 
+function LoadingStatus({ label }: { label: string }) {
+  const text = label.replace(/[.…]+$/, "")
+  return (
+    <div className="dream-loading inline-flex items-center gap-2 text-sm" role="status" aria-live="polite">
+      <span className="dream-loading-text">{text}</span>
+      <span className="dream-loading-dots" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </span>
+      <span className="sr-only">{label}</span>
+    </div>
+  )
+}
+
 function getCasualFeedbackReply(message: string, language: "en" | "zh") {
   const normalized = message.trim().toLowerCase()
   const asksForWork = /[?？]|推荐|分析|帮我|请问|怎么|如何|recommend|analy[sz]e|help|which|what|how/.test(normalized)
@@ -451,12 +488,16 @@ function getCasualFeedbackReply(message: string, language: "en" | "zh") {
     : "Thank you! I’m glad you like the design."
 }
 
+function isCasualGreeting(message: string) {
+  const normalized = message.trim().toLowerCase().replace(/[^a-z0-9\u3400-\u9fff]+/g, " ").trim()
+  return ["hi", "hello", "hey", "你好", "您好", "嗨", "哈喽"].includes(normalized)
+}
+
 function isClearlyUnclearMessage(message: string, awaitingPreference: string | null) {
   const compact = message.trim().toLowerCase().replace(/\s+/g, "")
+  if (awaitingPreference !== null) return false
   if (/[?？]/.test(compact) || /\d/.test(compact)) return false
   if (["hi", "go", "ok", "yes", "no", "嗨", "你好", "是", "否"].includes(compact)) return false
-  if (awaitingPreference === "field") return false
-  if (awaitingPreference === "states" && /^[a-z]{2}$/.test(compact)) return false
   return /^[a-z]$/.test(compact) || /^[a-z]{2}$/.test(compact)
 }
 
@@ -529,7 +570,7 @@ function AdmissionRateRange({ disabled, language, onSubmit }: { disabled: boolea
       </div>
       <div className="relative h-8" aria-label={zh ? "录取率范围" : "Admission-rate range"}>
         <div className="absolute inset-x-0 top-3 h-2 rounded-full bg-zinc-200" />
-        <div className="absolute top-3 h-2 rounded-full bg-zinc-800" style={fill} />
+        <div className="admission-range-fill absolute top-3 h-2 rounded-full" style={fill} />
         <input className="range-thumb absolute inset-x-0 top-0 w-full" type="range" min="0" max="100" step="1" value={min} disabled={disabled} aria-label={zh ? "最低录取率" : "Minimum admission rate"} onChange={(e) => setMin(Math.min(Number(e.target.value), max - 1))} />
         <input className="range-thumb absolute inset-x-0 top-0 w-full" type="range" min="0" max="100" step="1" value={max} disabled={disabled} aria-label={zh ? "最高录取率" : "Maximum admission rate"} onChange={(e) => setMax(Math.max(Number(e.target.value), min + 1))} />
       </div>

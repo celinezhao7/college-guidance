@@ -75,3 +75,4 @@ class ChatResponse(BaseModel):
     scenario: str | None = None
     quick_replies: list[QuickReply] = Field(default_factory=list)
     awaiting: str | None = None
+    session_reset: bool = False
