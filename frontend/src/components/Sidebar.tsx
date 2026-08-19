@@ -61,7 +61,7 @@ export function Sidebar({
         {zh ? "新对话" : "New chat"}
       </Button>
 
-      <div className="mt-10 space-y-5 px-1">
+      <div className="mt-6 space-y-5 px-1">
         <label className="block space-y-2">
           <span className="text-xs font-medium text-zinc-500">{zh ? "学生档案" : "Student profile"}</span>
           <select
