@@ -24,6 +24,8 @@ const defaultCollegePreferences: CollegePreferences = {
   ownership: ["any"],
   institution_format: ["either"],
   competition: ["any"],
+  admission_rate_min: 0,
+  admission_rate_max: 100,
   field: "Computer Science",
   targets: "No specific target",
   count: 5,
@@ -49,6 +51,7 @@ function App() {
   const [collegeScenario, setCollegeScenario] = useState<CollegeScenario>(null)
   const [answeredPreferences, setAnsweredPreferences] = useState<string[]>([])
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([])
+  const [awaitingPreference, setAwaitingPreference] = useState<string | null>(null)
   const scrollViewportRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -156,6 +159,7 @@ function App() {
       setCollegePreferences(response.preferences)
       setAnsweredPreferences(response.answered)
       setQuickReplies(response.quick_replies)
+      setAwaitingPreference(response.awaiting)
       setMessages((previous) => [
         ...previous,
         { role: "assistant", content: response.reply },
@@ -258,6 +262,7 @@ function App() {
     setLoadingPhase(null)
     setAnsweredPreferences([])
     setQuickReplies([])
+    setAwaitingPreference(null)
     setCollegePreferences(defaultCollegePreferences)
   }
 
@@ -369,19 +374,27 @@ function App() {
                     language={language}
                   />
                 )}
-                {modeId === "college_field" && quickReplies.length > 0 && !isStreaming && (
-                  <div className="mb-3 flex flex-wrap gap-2" aria-label={zh ? "快捷回答" : "Quick replies"}>
-                    {quickReplies.map((reply) => (
-                      <button
-                        key={reply.id}
-                        type="button"
-                        className="quick-reply"
-                        onClick={() => handleCollegeMessage(reply.label, reply.id)}
-                      >
-                        {reply.label}
-                      </button>
-                    ))}
-                  </div>
+                {modeId === "college_field" && !isStreaming && awaitingPreference === "competition" && (
+                    <AdmissionRateRange
+                      disabled={isStreaming}
+                      language={language}
+                      onSubmit={(min, max) => handleCollegeMessage(`${min}%–${max}%`)}
+                      onSkip={() => handleCollegeMessage(language === "zh" ? "跳过" : "Skip", "skip")}
+                    />
+                )}
+                {modeId === "college_field" && quickReplies.length > 0 && !isStreaming && awaitingPreference !== "competition" && (
+                    <div className="mb-3 flex flex-wrap gap-2" aria-label={zh ? "快捷回答" : "Quick replies"}>
+                      {quickReplies.map((reply) => (
+                        <button
+                          key={reply.id}
+                          type="button"
+                          className="quick-reply"
+                          onClick={() => handleCollegeMessage(reply.label, reply.id)}
+                        >
+                          {reply.label}
+                        </button>
+                      ))}
+                    </div>
                 )}
                 <ChatComposer
                   input={input}
@@ -425,7 +438,7 @@ function PreferenceSummary({ preferences, answered, language }: { preferences: C
     states: preferences.states || (zh ? "州不限" : "Any state"),
     max_cost: preferences.max_cost ? `$${preferences.max_cost.toLocaleString()}` : (zh ? "费用不限" : "No cost limit"),
     size: localizedValue(preferences.size[0]),
-    competition: localizedValue(preferences.competition[0]),
+    competition: `${preferences.admission_rate_min}%–${preferences.admission_rate_max}%`,
     sat: preferences.sat ? `SAT ${preferences.sat}` : (zh ? "未提供 SAT" : "SAT skipped"),
     act: preferences.act ? `ACT ${preferences.act}` : (zh ? "未提供 ACT" : "ACT skipped"),
     ownership: localizedValue(preferences.ownership[0]),
@@ -436,6 +449,36 @@ function PreferenceSummary({ preferences, answered, language }: { preferences: C
   return (
     <div className="mb-3 flex flex-wrap gap-2">
       {answered.map((key) => <span key={key} className="dream-chip rounded-full px-3 py-1 text-xs text-zinc-700">{labels[key]}</span>)}
+    </div>
+  )
+}
+
+function AdmissionRateRange({ disabled, language, onSubmit, onSkip }: { disabled: boolean; language: "en" | "zh"; onSubmit: (min: number, max: number) => void; onSkip: () => void }) {
+  const [min, setMin] = useState(0)
+  const [max, setMax] = useState(100)
+  const zh = language === "zh"
+  const fill = { left: `${min}%`, right: `${100 - max}%` }
+
+  return (
+    <div className="mb-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+      <div className="mb-3 flex items-center justify-between gap-4">
+        <span className="text-sm font-medium text-zinc-700">{zh ? "学校整体录取率范围" : "Overall admission-rate range"}</span>
+        <span className="rounded-full bg-zinc-100 px-3 py-1 text-sm tabular-nums text-zinc-700">{min}%–{max}%</span>
+      </div>
+      <div className="relative h-8" aria-label={zh ? "录取率范围" : "Admission-rate range"}>
+        <div className="absolute inset-x-0 top-3 h-2 rounded-full bg-zinc-200" />
+        <div className="absolute top-3 h-2 rounded-full bg-zinc-800" style={fill} />
+        <input className="range-thumb absolute inset-x-0 top-0 w-full" type="range" min="0" max="100" step="1" value={min} disabled={disabled} aria-label={zh ? "最低录取率" : "Minimum admission rate"} onChange={(e) => setMin(Math.min(Number(e.target.value), max - 1))} />
+        <input className="range-thumb absolute inset-x-0 top-0 w-full" type="range" min="0" max="100" step="1" value={max} disabled={disabled} aria-label={zh ? "最高录取率" : "Maximum admission rate"} onChange={(e) => setMax(Math.max(Number(e.target.value), min + 1))} />
+      </div>
+      <div className="mt-1 flex items-center justify-between text-xs text-zinc-400"><span>0%</span><span>100%</span></div>
+      <div className="mt-3 flex items-center justify-between gap-3">
+        <p className="text-xs text-zinc-500">{zh ? "这是学校整体录取率，不代表你的个人录取概率。" : "This is the school's overall rate, not your personal admission chance."}</p>
+        <div className="flex shrink-0 gap-2">
+          <button type="button" className="quick-reply" disabled={disabled} onClick={onSkip}>{zh ? "跳过" : "Skip"}</button>
+          <button type="button" className="quick-reply" disabled={disabled} onClick={() => onSubmit(min, max)}>{zh ? "确认范围" : "Apply range"}</button>
+        </div>
+      </div>
     </div>
   )
 }

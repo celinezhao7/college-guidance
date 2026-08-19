@@ -109,8 +109,9 @@ CIP_FIELD_SYSTEM_PROMPT = MAJOR_SYSTEM_PROMPT + """
 
 Official-classification rules:
 - Recommend only fields present in the supplied OFFICIAL NCES CIP 2020 FOUR-DIGIT FIELDS list.
-- Display each field's exact four-digit CIP code and exact title. Do not rename,
-  combine, broaden, embellish, or invent field titles.
+- Display each field's exact title, but never display its CIP code. The codes are
+  internal matching data only. Do not rename, combine, broaden, embellish, or
+  invent field titles.
 - Interdisciplinary connections may be discussed only in the explanation; they
   must never replace the official field title.
 - These are federal classification categories, not confirmation that a specific
@@ -270,8 +271,9 @@ def stream_official_cip_field_recommendations(
 === OFFICIAL NCES CIP 2020 FOUR-DIGIT FIELDS ===
 {json.dumps(cip_fields, ensure_ascii=False)}
 
-Recommend five well-supported official fields to explore. Use only exact codes
-and titles from the supplied list."""
+Recommend five well-supported official fields to explore. Use only exact titles
+from the supplied list. Use the codes internally for matching, but do not include
+them anywhere in the user-visible response."""
     for chunk in llm.stream(
         [
             ("system", CIP_FIELD_SYSTEM_PROMPT + output_language_instruction(language)),
@@ -1014,17 +1016,22 @@ def filter_by_institution_format(
 
 
 def filter_by_selectivity(
-    colleges: Iterable[dict], preferences: list[str]
+    colleges: Iterable[dict],
+    preferences: list[str],
+    minimum: int = 0,
+    maximum: int = 100,
 ) -> list[dict]:
     """Apply the user's admission-rate category as a strict data filter."""
     colleges = list(colleges)
-    if "any" in preferences:
+    if "any" in preferences and minimum == 0 and maximum == 100:
         return colleges
 
     def matches(college: dict) -> bool:
         admission_rate = college.get("latest.admissions.admission_rate.overall")
         if admission_rate is None:
             return False
+        if "range" in preferences:
+            return minimum / 100 <= admission_rate <= maximum / 100
         return any(
             (preference == "high" and admission_rate < 0.25)
             or (preference == "medium" and 0.25 <= admission_rate < 0.60)
@@ -1228,7 +1235,12 @@ def recommend_colleges(llm, student_context: str, language="en") -> None:
             colleges, preferences["institution_format"]
         )
         colleges = filter_by_size(colleges, preferences["size"])
-        colleges = filter_by_selectivity(colleges, preferences["competition"])
+        colleges = filter_by_selectivity(
+            colleges,
+            preferences["competition"],
+            preferences.get("admission_rate_min", 0),
+            preferences.get("admission_rate_max", 100),
+        )
         colleges = filter_by_max_cost(colleges, preferences["max_cost"])
         candidate_limit = min(60, max(30, requested_count * 3))
         candidates = rank_colleges(colleges, preferences, candidate_limit)
@@ -1320,7 +1332,12 @@ def stream_college_recommendations(
         base_colleges, preferences["institution_format"]
     )
     colleges = filter_by_size(colleges, preferences["size"])
-    colleges = filter_by_selectivity(colleges, preferences["competition"])
+    colleges = filter_by_selectivity(
+        colleges,
+        preferences["competition"],
+        preferences.get("admission_rate_min", 0),
+        preferences.get("admission_rate_max", 100),
+    )
     colleges = filter_by_max_cost(colleges, preferences["max_cost"])
     # Rank broadly, but fetch the large Scorecard CIP payload in small batches.
     # Most requests find enough supported schools in the first batch, avoiding

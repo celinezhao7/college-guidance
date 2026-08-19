@@ -46,6 +46,8 @@ class CollegePreferences(BaseModel):
     ownership: list[str] = ["any"]
     institution_format: list[str] = ["either"]
     competition: list[str] = ["any"]
+    admission_rate_min: int = Field(default=0, ge=0, le=100)
+    admission_rate_max: int = Field(default=100, ge=0, le=100)
     field: str = "Computer Science"
     targets: str = "No specific target"
     count: int = Field(default=5, ge=1, le=20)
@@ -72,3 +74,4 @@ class ChatResponse(BaseModel):
     answered: list[str]
     scenario: str | None = None
     quick_replies: list[QuickReply] = Field(default_factory=list)
+    awaiting: str | None = None

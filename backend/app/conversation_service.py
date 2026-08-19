@@ -38,7 +38,7 @@ QUESTIONS = {
         "states": "Which states do you prefer? Use abbreviations such as CA or WA, or say “any.”",
         "max_cost": "What is your maximum annual cost before aid? You can also say “no limit.”",
         "size": "Do you prefer a small, medium, or large school—or any size?",
-        "competition": "What institutional selectivity do you prefer: lower, medium, higher, or any? This is based on the school’s overall admission rate, not your personal admission chance.",
+        "competition": "What overall admission-rate range do you prefer? Choose a minimum and maximum percentage. This is not your personal admission chance.",
         "sat": "What is your SAT score? You can say “skip.” It is context only, not an admission prediction.",
         "act": "What is your ACT score? You can say “skip.” It is context only, not an admission prediction.",
         "ownership": "Do you prefer public, private nonprofit, private for-profit, or any ownership type?",
@@ -52,7 +52,7 @@ QUESTIONS = {
         "states": "你偏好哪些州？请输入 CA、WA 等缩写，也可以回答“不限”。",
         "max_cost": "你能接受的助学金前最高年度费用是多少？也可以回答“不限”。",
         "size": "你偏好小型、中型还是大型学校？也可以回答“不限”。",
-        "competition": "你偏好的学校竞争程度是较低、中等、较高还是不限？这里依据学校整体录取率，不代表个人录取概率。",
+        "competition": "你偏好的学校整体录取率范围是多少？请选择最低和最高百分比。这里不代表个人录取概率。",
         "sat": "你的 SAT 分数是多少？可以回答“跳过”。该分数仅作为背景信息，不用于预测录取。",
         "act": "你的 ACT 分数是多少？可以回答“跳过”。该分数仅作为背景信息，不用于预测录取。",
         "ownership": "你偏好公立、私立非营利、私立营利，还是不限学校性质？",
@@ -96,6 +96,8 @@ class Conversation:
         "ownership": ["any"],
         "institution_format": ["either"],
         "competition": ["any"],
+        "admission_rate_min": 0,
+        "admission_rate_max": 100,
         "field": "",
         "targets": "No specific target",
         "count": 5,
@@ -430,6 +432,7 @@ def _parse(answer_for: str, message: str, preferences: dict) -> bool:
                 return False
             preferences["size"] = [selected]
     elif answer_for == "competition":
+        rate_range = re.search(r"(\d{1,3})\s*%?\s*[–—-]\s*(\d{1,3})\s*%?", value)
         mapping = {
             "lower": "low", "low": "low", "less selective": "low",
             "medium": "medium", "moderate": "medium",
@@ -437,8 +440,17 @@ def _parse(answer_for: str, message: str, preferences: dict) -> bool:
             "competitive": "high", "较低": "low",
             "中等": "medium", "较高": "high",
         }
-        if _is_skip(value):
+        if rate_range:
+            minimum, maximum = map(int, rate_range.groups())
+            if not 0 <= minimum < maximum <= 100:
+                return False
+            preferences["competition"] = ["range"]
+            preferences["admission_rate_min"] = minimum
+            preferences["admission_rate_max"] = maximum
+        elif _is_skip(value):
             preferences["competition"] = ["any"]
+            preferences["admission_rate_min"] = 0
+            preferences["admission_rate_max"] = 100
         else:
             selected = next((result for key, result in mapping.items() if key in lowered), None)
             if not selected:
@@ -491,6 +503,8 @@ def _parse(answer_for: str, message: str, preferences: dict) -> bool:
             else "No specific target" if _is_skip(value)
             else value
         )
+    elif answer_for == "count" and _is_skip(value):
+        preferences["count"] = 5
     elif answer_for == "count":
         number = _number(value)
         if number is None or not 1 <= number <= 20 or not number.is_integer():
@@ -743,14 +757,14 @@ def _quick_replies(conversation: Conversation) -> list[dict[str, str]]:
         "field_confirmation": ["field_yes", "field_no"],
         "sat": ["skip"],
         "act": ["skip"],
-        "states": ["any"],
-        "max_cost": ["any"],
-        "size": ["size_small", "size_medium", "size_large", "any"],
-        "ownership": ["ownership_public", "ownership_nonprofit", "ownership_for_profit", "any"],
-        "institution_format": ["format_university", "format_liberal_arts", "any"],
-        "competition": ["competition_low", "competition_medium", "competition_high", "any"],
-        "targets": ["no_target"],
-        "count": ["count_5", "count_10"],
+        "states": ["skip"],
+        "max_cost": ["skip"],
+        "size": ["size_small", "size_medium", "size_large", "skip"],
+        "ownership": ["ownership_public", "ownership_nonprofit", "ownership_for_profit", "skip"],
+        "institution_format": ["format_university", "format_liberal_arts", "skip"],
+        "competition": [],
+        "targets": ["skip"],
+        "count": ["count_5", "count_10", "skip"],
     }
     return [{"id": choice, "label": labels[choice]} for choice in choices_by_question.get(key or "", [])]
 
@@ -920,4 +934,5 @@ def _response(conversation: Conversation, reply: str, ready: bool = False) -> di
         "answered": [key for key in MAJOR_FIRST_QUESTIONS if key in conversation.answered],
         "scenario": conversation.scenario,
         "quick_replies": [] if ready else _quick_replies(conversation),
+        "awaiting": None if ready else conversation.awaiting,
     }

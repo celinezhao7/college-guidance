@@ -152,17 +152,17 @@
 
   .dream-chip:nth-child(3) {
     --chip-start: rgba(242, 231, 244, 0.76);
-    --chip-end: rgba(247, 232, 237, 0.73);
+    --chip-end: rgba(246, 232, 240, 0.73);
   }
 
   .dream-chip:nth-child(4) {
-    --chip-start: rgba(247, 232, 237, 0.73);
-    --chip-end: rgba(249, 235, 229, 0.71);
+    --chip-start: rgba(246, 232, 240, 0.73);
+    --chip-end: rgba(247, 233, 237, 0.71);
   }
 
   .dream-chip:nth-child(n + 5) {
-    --chip-start: rgba(249, 235, 229, 0.71);
-    --chip-end: rgba(250, 239, 227, 0.69);
+    --chip-start: rgba(247, 233, 237, 0.71);
+    --chip-end: rgba(246, 235, 240, 0.69);
   }
 
   .quick-reply {
@@ -207,4 +207,31 @@
     outline: 2px solid rgba(137, 130, 177, 0.7);
     outline-offset: 2px;
   }
+}
+/* Two overlapping native ranges form an accessible admission-rate interval. */
+.range-thumb {
+  appearance: none;
+  pointer-events: none;
+  background: transparent;
+}
+.range-thumb::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border: 3px solid white;
+  border-radius: 9999px;
+  background: #27272a;
+  box-shadow: 0 0 0 1px #a1a1aa, 0 1px 3px rgb(0 0 0 / 0.2);
+  cursor: grab;
+  pointer-events: auto;
+}
+.range-thumb::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 3px solid white;
+  border-radius: 9999px;
+  background: #27272a;
+  box-shadow: 0 0 0 1px #a1a1aa, 0 1px 3px rgb(0 0 0 / 0.2);
+  cursor: grab;
+  pointer-events: auto;
 }

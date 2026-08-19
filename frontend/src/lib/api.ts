@@ -20,6 +20,8 @@ export type CollegePreferences = {
   ownership: string[]
   institution_format: string[]
   competition: string[]
+  admission_rate_min: number
+  admission_rate_max: number
   field: string
   targets: string
   count: number
@@ -133,5 +135,6 @@ export async function continueCollegeConversation(request: {
     answered: string[]
     scenario: string | null
     quick_replies: QuickReply[]
+    awaiting: string | null
   }>
 }
