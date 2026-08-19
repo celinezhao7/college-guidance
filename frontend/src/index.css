@@ -72,22 +72,22 @@
   }
 
   .dream-mode-button:nth-child(1) {
-    --mode-start: rgba(239, 239, 249, 0.75);
-    --mode-end: rgba(242, 239, 248, 0.73);
+    --mode-start: #f2f2f9;
+    --mode-end: #f3f0f6;
     --mode-active-start: rgba(221, 222, 243, 0.92);
     --mode-active-end: rgba(228, 221, 240, 0.91);
   }
 
   .dream-mode-button:nth-child(2) {
-    --mode-start: rgba(242, 239, 248, 0.73);
-    --mode-end: rgba(246, 239, 246, 0.72);
+    --mode-start: #f3f0f6;
+    --mode-end: #f4eef2;
     --mode-active-start: rgba(228, 221, 240, 0.91);
     --mode-active-end: rgba(235, 221, 237, 0.89);
   }
 
   .dream-mode-button:nth-child(3) {
-    --mode-start: rgba(246, 239, 246, 0.72);
-    --mode-end: rgba(249, 237, 232, 0.7);
+    --mode-start: #f4eef2;
+    --mode-end: #f5ecef;
     --mode-active-start: rgba(235, 221, 237, 0.89);
     --mode-active-end: rgba(242, 219, 228, 0.88);
   }
@@ -140,34 +140,34 @@
   }
 
   .dream-chip {
-    --chip-start: rgba(229, 233, 248, 0.82);
-    --chip-end: rgba(236, 232, 247, 0.79);
+    --chip-start: #f2f2f9;
+    --chip-end: #f3f1f7;
     background: linear-gradient(110deg, var(--chip-start), var(--chip-end));
   }
 
   .dream-chip:nth-child(2) {
-    --chip-start: rgba(236, 232, 247, 0.79);
-    --chip-end: rgba(242, 231, 244, 0.76);
+    --chip-start: #f3f1f7;
+    --chip-end: #f3eff5;
   }
 
   .dream-chip:nth-child(3) {
-    --chip-start: rgba(242, 231, 244, 0.76);
-    --chip-end: rgba(246, 232, 240, 0.73);
+    --chip-start: #f3eff5;
+    --chip-end: #f4eef3;
   }
 
   .dream-chip:nth-child(4) {
-    --chip-start: rgba(246, 232, 240, 0.73);
-    --chip-end: rgba(247, 233, 237, 0.71);
+    --chip-start: #f4eef3;
+    --chip-end: #f5ecef;
   }
 
   .dream-chip:nth-child(n + 5) {
-    --chip-start: rgba(247, 233, 237, 0.71);
-    --chip-end: rgba(246, 235, 240, 0.69);
+    --chip-start: #f5ecef;
+    --chip-end: #f5ecef;
   }
 
   .quick-reply {
-    --quick-start: rgba(239, 239, 249, 0.75);
-    --quick-end: rgba(242, 239, 248, 0.73);
+    --quick-start: #f2f2f9;
+    --quick-end: #f3f1f7;
     display: inline-flex;
     min-height: 2.65rem;
     align-items: center;
@@ -183,18 +183,18 @@
   }
 
   .quick-reply:nth-child(2) {
-    --quick-start: rgba(242, 239, 248, 0.73);
-    --quick-end: rgba(246, 239, 246, 0.72);
+    --quick-start: #f3f1f7;
+    --quick-end: #f3eff5;
   }
 
   .quick-reply:nth-child(3) {
-    --quick-start: rgba(246, 239, 246, 0.72);
-    --quick-end: rgba(249, 237, 232, 0.7);
+    --quick-start: #f3eff5;
+    --quick-end: #f4eef3;
   }
 
   .quick-reply:nth-child(4) {
-    --quick-start: rgba(249, 237, 232, 0.7);
-    --quick-end: rgba(250, 238, 229, 0.69);
+    --quick-start: #f4eef3;
+    --quick-end: #f5ecef;
   }
 
   .quick-reply:hover {

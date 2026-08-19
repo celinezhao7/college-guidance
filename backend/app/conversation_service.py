@@ -503,8 +503,6 @@ def _parse(answer_for: str, message: str, preferences: dict) -> bool:
             else "No specific target" if _is_skip(value)
             else value
         )
-    elif answer_for == "count" and _is_skip(value):
-        preferences["count"] = 5
     elif answer_for == "count":
         number = _number(value)
         if number is None or not 1 <= number <= 20 or not number.is_integer():
@@ -757,14 +755,14 @@ def _quick_replies(conversation: Conversation) -> list[dict[str, str]]:
         "field_confirmation": ["field_yes", "field_no"],
         "sat": ["skip"],
         "act": ["skip"],
-        "states": ["skip"],
-        "max_cost": ["skip"],
-        "size": ["size_small", "size_medium", "size_large", "skip"],
-        "ownership": ["ownership_public", "ownership_nonprofit", "ownership_for_profit", "skip"],
-        "institution_format": ["format_university", "format_liberal_arts", "skip"],
+        "states": ["any"],
+        "max_cost": ["any"],
+        "size": ["size_small", "size_medium", "size_large", "any"],
+        "ownership": ["ownership_public", "ownership_nonprofit", "ownership_for_profit", "any"],
+        "institution_format": ["format_university", "format_liberal_arts", "any"],
         "competition": [],
-        "targets": ["skip"],
-        "count": ["count_5", "count_10", "skip"],
+        "targets": ["no_target"],
+        "count": ["count_5", "count_10"],
     }
     return [{"id": choice, "label": labels[choice]} for choice in choices_by_question.get(key or "", [])]
 

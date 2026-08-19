@@ -718,16 +718,16 @@ def stream_recommendation(
     college_preferences: dict | None = None,
     college_scenario: str | None = None,
 ):
-    student_retriever, all_student_experience_retriever = (
-        create_student_retrievers(profile_name)
-    )
-
     llm = ChatOpenAI(
         model=os.getenv("QWEN_MODEL", "qwen3.5-plus"),
         api_key=os.getenv("DASHSCOPE_API_KEY"),
         base_url=os.getenv("DASHSCOPE_BASE_URL"),
         temperature=0.2,
         extra_body={"enable_thinking": False},
+    )
+
+    student_retriever, all_student_experience_retriever = (
+        create_student_retrievers(profile_name)
     )
 
     if application_type == "college_major":
@@ -771,6 +771,18 @@ def stream_recommendation(
     else:
         raise ValueError(f"Unsupported application type: {application_type}")
 
+    system_prompt += """
+
+# USER MESSAGE RELEVANCE
+
+First inspect the supplied USER MESSAGE. If it is casual conversation, unclear,
+or unrelated to the selected essay-recommendation tool, do not perform the
+recommendation task and do not discuss the student profile. Reply briefly and
+politely that you did not understand the request and explain that this tool is
+for recommending application essay prompts. If the message is relevant, proceed
+with the recommendation task normally.
+"""
+
     guidance_docs = guidance_retriever.invoke(guidance_query)
 
     student_docs = deduplicate_documents(
@@ -790,6 +802,10 @@ def stream_recommendation(
 
 {student_context}
 
+=== USER MESSAGE ===
+
+{query}
+
 Recommend the 4 best-supported UC PIQs for this student.
 """
     else:
@@ -801,6 +817,10 @@ Recommend the 4 best-supported UC PIQs for this student.
 === STUDENT EVIDENCE ===
 
 {student_context}
+
+=== USER MESSAGE ===
+
+{query}
 
 Recommend the 3 best-supported Common App essay prompts
 for this student and identify the Best Overall Choice.
@@ -814,7 +834,6 @@ for this student and identify the Best Overall Choice.
     ):
         if chunk.content:
             yield chunk.content
-
 # ============================================================
 # Main
 # ============================================================

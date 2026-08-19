@@ -85,6 +85,32 @@ function App() {
     const trimmedInput = input.trim()
     const isCollegeMode = modeId === "college_field"
     if (!trimmedInput || !profileId || !modeId || isStreaming) return
+
+    const casualReply = getCasualFeedbackReply(trimmedInput, language)
+    if (casualReply) {
+      setMessages((previous) => [
+        ...previous,
+        { role: "user", content: trimmedInput },
+        { role: "assistant", content: casualReply },
+      ])
+      setInput("")
+      return
+    }
+
+    if (isClearlyUnclearMessage(trimmedInput, awaitingPreference)) {
+      const replyInChinese = language === "zh" || /[\u4e00-\u9fff]/.test(trimmedInput)
+      setMessages((previous) => [
+        ...previous,
+        { role: "user", content: trimmedInput },
+        {
+          role: "assistant",
+          content: getUnclearInputReply(modeId, replyInChinese),
+        },
+      ])
+      setInput("")
+      return
+    }
+
     if (isCollegeMode) {
       await handleCollegeMessage(trimmedInput)
       return
@@ -118,9 +144,7 @@ function App() {
           )
         },
       )
-    } catch (error) {
-      const detail =
-        error instanceof Error ? error.message : "The recommendation failed."
+    } catch {
       setMessages((previous) =>
         previous.map((message, index) =>
           index === previous.length - 1
@@ -129,7 +153,7 @@ function App() {
                 content:
                   language === "zh"
                     ? "抱歉，暂时无法生成推荐，请稍后重试。"
-                    : `Sorry, I couldn't generate a recommendation. ${detail}`,
+                    : "Sorry, I couldn’t generate the recommendation right now. Please try again.",
               }
             : message,
         ),
@@ -191,13 +215,12 @@ function App() {
           },
         )
       }
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : "Request failed."
+    } catch {
       setMessages((previous) => [
         ...previous,
         {
           role: "assistant",
-          content: language === "zh" ? "抱歉，请求失败，请稍后重试。" : `Sorry, something went wrong: ${detail}`,
+          content: language === "zh" ? "抱歉，请求暂时无法完成，请稍后重试。" : "Sorry, I couldn’t complete that request right now. Please try again.",
         },
       ])
     } finally {
@@ -379,7 +402,6 @@ function App() {
                       disabled={isStreaming}
                       language={language}
                       onSubmit={(min, max) => handleCollegeMessage(`${min}%–${max}%`)}
-                      onSkip={() => handleCollegeMessage(language === "zh" ? "跳过" : "Skip", "skip")}
                     />
                 )}
                 {modeId === "college_field" && quickReplies.length > 0 && !isStreaming && awaitingPreference !== "competition" && (
@@ -413,6 +435,46 @@ function App() {
 }
 
 export default App
+
+function getCasualFeedbackReply(message: string, language: "en" | "zh") {
+  const normalized = message.trim().toLowerCase()
+  const asksForWork = /[?？]|推荐|分析|帮我|请问|怎么|如何|recommend|analy[sz]e|help|which|what|how/.test(normalized)
+  if (asksForWork) return null
+
+  const isChineseFeedback = /(?:网站|网页|界面|设计).{0,8}(?:好看|漂亮|不错|很棒|喜欢)/.test(normalized)
+  const isEnglishFeedback = /(?:website|site|app|interface|design).{0,12}(?:looks?\s+)?(?:great|good|nice|beautiful|lovely)|love.{0,8}(?:website|site|app|interface|design)/.test(normalized)
+  const isPositiveSiteFeedback = isChineseFeedback || isEnglishFeedback
+
+  if (!isPositiveSiteFeedback) return null
+  return language === "zh" || isChineseFeedback
+    ? "谢谢！很高兴你喜欢这个网站的设计。"
+    : "Thank you! I’m glad you like the design."
+}
+
+function isClearlyUnclearMessage(message: string, awaitingPreference: string | null) {
+  const compact = message.trim().toLowerCase().replace(/\s+/g, "")
+  if (/[?？]/.test(compact) || /\d/.test(compact)) return false
+  if (["hi", "go", "ok", "yes", "no", "嗨", "你好", "是", "否"].includes(compact)) return false
+  if (awaitingPreference === "field") return false
+  if (awaitingPreference === "states" && /^[a-z]{2}$/.test(compact)) return false
+  return /^[a-z]$/.test(compact) || /^[a-z]{2}$/.test(compact)
+}
+
+function getUnclearInputReply(modeId: string, chinese: boolean) {
+  if (modeId === "college_field") {
+    return chinese
+      ? "抱歉，我没有理解你的意思。这个功能用于探索大学和专业领域；你可以告诉我是否已有目标大学、目标专业，或仍在探索。"
+      : "Sorry, I didn’t understand that. This tool helps you explore colleges and fields of study—tell me whether you have a target college, a target field, or are still exploring."
+  }
+  if (modeId === "common_app") {
+    return chinese
+      ? "抱歉，我没有理解你的意思。这个功能用于根据学生档案推荐 Common App 主文书题目，请告诉我你希望获得哪方面的帮助。"
+      : "Sorry, I didn’t understand that. This tool recommends Common App essay prompts based on the student profile—tell me what you’d like help with."
+  }
+  return chinese
+    ? "抱歉，我没有理解你的意思。这个功能用于根据学生档案推荐 UC PIQ 题目，请告诉我你希望获得哪方面的帮助。"
+    : "Sorry, I didn’t understand that. This tool recommends UC PIQ prompts based on the student profile—tell me what you’d like help with."
+}
 
 function PreferenceSummary({ preferences, answered, language }: { preferences: CollegePreferences; answered: string[]; language: "en" | "zh" }) {
   const zh = language === "zh"
@@ -453,7 +515,7 @@ function PreferenceSummary({ preferences, answered, language }: { preferences: C
   )
 }
 
-function AdmissionRateRange({ disabled, language, onSubmit, onSkip }: { disabled: boolean; language: "en" | "zh"; onSubmit: (min: number, max: number) => void; onSkip: () => void }) {
+function AdmissionRateRange({ disabled, language, onSubmit }: { disabled: boolean; language: "en" | "zh"; onSubmit: (min: number, max: number) => void }) {
   const [min, setMin] = useState(0)
   const [max, setMax] = useState(100)
   const zh = language === "zh"
@@ -474,10 +536,7 @@ function AdmissionRateRange({ disabled, language, onSubmit, onSkip }: { disabled
       <div className="mt-1 flex items-center justify-between text-xs text-zinc-400"><span>0%</span><span>100%</span></div>
       <div className="mt-3 flex items-center justify-between gap-3">
         <p className="text-xs text-zinc-500">{zh ? "这是学校整体录取率，不代表你的个人录取概率。" : "This is the school's overall rate, not your personal admission chance."}</p>
-        <div className="flex shrink-0 gap-2">
-          <button type="button" className="quick-reply" disabled={disabled} onClick={onSkip}>{zh ? "跳过" : "Skip"}</button>
-          <button type="button" className="quick-reply" disabled={disabled} onClick={() => onSubmit(min, max)}>{zh ? "确认范围" : "Apply range"}</button>
-        </div>
+        <button type="button" className="quick-reply shrink-0" disabled={disabled} onClick={() => onSubmit(min, max)}>{zh ? "确认范围" : "Apply range"}</button>
       </div>
     </div>
   )
