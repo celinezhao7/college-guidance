@@ -58,6 +58,12 @@ type ModeConversationState = {
 type StoredWorkspace = {
   activeModeId: string
   conversations: Record<string, ModeConversationState>
+  archives?: ArchivedConversation[]
+}
+type ArchivedConversation = {
+  id: string
+  modeId: string
+  conversation: ModeConversationState
 }
 
 function emptyModeConversation(): ModeConversationState {
@@ -102,6 +108,7 @@ function App() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true)
   const [storageHydrated, setStorageHydrated] = useState(false)
+  const [chatArchives, setChatArchives] = useState<ArchivedConversation[]>([])
   const [canStopGeneration, setCanStopGeneration] = useState(false)
   const scrollViewportRef = useRef<HTMLDivElement>(null)
   const generationAbortRef = useRef<AbortController | null>(null)
@@ -144,6 +151,7 @@ function App() {
       const raw = sessionStorage.getItem(storageKey(profileId))
       const stored = raw ? JSON.parse(raw) as StoredWorkspace : null
       modeConversationsRef.current = stored?.conversations ?? {}
+      setChatArchives(stored?.archives ?? [])
       const restoredMode = stored?.activeModeId ?? ""
       setModeId(restoredMode)
       applyModeConversation(
@@ -151,6 +159,7 @@ function App() {
       )
     } catch {
       modeConversationsRef.current = {}
+      setChatArchives([])
       setModeId("")
       applyModeConversation(emptyModeConversation())
     } finally {
@@ -174,9 +183,9 @@ function App() {
       })
     }
     modeConversationsRef.current = conversations
-    const stored: StoredWorkspace = { activeModeId: modeId, conversations }
+    const stored: StoredWorkspace = { activeModeId: modeId, conversations, archives: chatArchives }
     sessionStorage.setItem(storageKey(profileId), JSON.stringify(stored))
-  }, [answeredPreferences, awaitingPreference, collegePreferences, collegeScenario, input, messages, modeId, profileId, quickReplies, sessionId, storageHydrated])
+  }, [answeredPreferences, awaitingPreference, chatArchives, collegePreferences, collegeScenario, input, messages, modeId, profileId, quickReplies, sessionId, storageHydrated])
 
   useLayoutEffect(() => {
     const viewport = scrollViewportRef.current
@@ -487,6 +496,35 @@ function App() {
         : (modeConversationsRef.current[mode.id]?.messages.length ?? 0) > 0
     ))
     .map((mode) => mode.id)
+  const activeHistoryItems = modes.flatMap((mode) => {
+    const conversationMessages = mode.id === modeId
+      ? messages
+      : (modeConversationsRef.current[mode.id]?.messages ?? [])
+    if (conversationMessages.length === 0) return []
+    const previewMessage = [...conversationMessages]
+      .reverse()
+      .find((message) => message.role === "user") ?? conversationMessages.at(-1)
+    return [{
+      id: `mode:${mode.id}`,
+      modeId: mode.id,
+      title: language === "zh" ? mode.title_zh : mode.title_en,
+      preview: previewMessage?.content.replace(/\s+/g, " ").trim() || (language === "zh" ? "已有对话" : "Saved conversation"),
+    }]
+  })
+  const archivedHistoryItems = chatArchives.flatMap((archive) => {
+    const mode = modes.find((candidate) => candidate.id === archive.modeId)
+    if (!mode || archive.conversation.messages.length === 0) return []
+    const previewMessage = [...archive.conversation.messages]
+      .reverse()
+      .find((message) => message.role === "user") ?? archive.conversation.messages.at(-1)
+    return [{
+      id: `archive:${archive.id}`,
+      modeId: archive.modeId,
+      title: language === "zh" ? mode.title_zh : mode.title_en,
+      preview: previewMessage?.content.replace(/\s+/g, " ").trim() || (language === "zh" ? "已有对话" : "Saved conversation"),
+    }]
+  })
+  const historyItems = [...archivedHistoryItems, ...activeHistoryItems]
 
   function handleLanguageChange(nextLanguage: "en" | "zh") {
     setLanguage(nextLanguage)
@@ -535,7 +573,17 @@ function App() {
   }
 
   function handleNewChat() {
-    modeConversationsRef.current = {}
+    if (modeId && messages.length > 0) {
+      const safeConversation = persistableConversation(currentConversation())
+      if (safeConversation.messages.length > 0) {
+        setChatArchives((previous) => [{
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          modeId,
+          conversation: safeConversation,
+        }, ...previous].slice(0, 20))
+      }
+      delete modeConversationsRef.current[modeId]
+    }
     setInput("")
     setMessages([])
     setModeId("")
@@ -555,6 +603,7 @@ function App() {
 
   function resetConversationState() {
     modeConversationsRef.current = {}
+    setChatArchives([])
     setInput("")
     setMessages([])
     setSessionId(null)
@@ -607,6 +656,36 @@ function App() {
     setModeId(nextModeId)
   }
 
+  function currentConversation(): ModeConversationState {
+    return {
+      input,
+      messages,
+      collegePreferences,
+      sessionId,
+      collegeScenario,
+      answeredPreferences,
+      quickReplies,
+      awaitingPreference,
+    }
+  }
+
+  function handleHistoryOpen(historyId: string) {
+    if (historyId.startsWith("mode:")) {
+      handleModeChange(historyId.slice("mode:".length))
+      return
+    }
+    const archiveId = historyId.slice("archive:".length)
+    const archive = chatArchives.find((item) => item.id === archiveId)
+    if (!archive) return
+    if (modeId && messages.length > 0) {
+      modeConversationsRef.current[modeId] = currentConversation()
+    }
+    setChatArchives((previous) => previous.filter((item) => item.id !== archiveId))
+    delete modeConversationsRef.current[archive.modeId]
+    applyModeConversation(archive.conversation)
+    setModeId(archive.modeId)
+  }
+
   function applyModeConversation(nextConversation: ModeConversationState) {
     setInput(nextConversation.input)
     setMessages(nextConversation.messages)
@@ -643,6 +722,8 @@ function App() {
         mobileOpen={mobileSidebarOpen}
         desktopOpen={desktopSidebarOpen}
         modeHistoryIds={modeHistoryIds}
+        historyItems={historyItems}
+        onHistoryOpen={handleHistoryOpen}
         onProfileChange={handleProfileChange}
         onModeChange={handleModeChange}
         onLanguageChange={handleLanguageChange}

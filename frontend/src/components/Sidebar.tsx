@@ -1,4 +1,4 @@
-import { Plus, ShieldCheck, X } from "lucide-react"
+import { MessageSquareText, Plus, ShieldCheck, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import type { Profile, RecommendationMode } from "@/lib/api"
@@ -13,10 +13,12 @@ type SidebarProps = {
   mobileOpen: boolean
   desktopOpen: boolean
   modeHistoryIds: string[]
+  historyItems: Array<{ id: string; modeId: string; title: string; preview: string }>
   onProfileChange: (value: string) => void
   onModeChange: (value: string) => void
   onLanguageChange: (value: "en" | "zh") => void
   onNewChat: () => void
+  onHistoryOpen: (id: string) => void
   onMobileClose: () => void
   onClose: () => void
 }
@@ -36,10 +38,12 @@ export function Sidebar({
   mobileOpen,
   desktopOpen,
   modeHistoryIds,
+  historyItems,
   onProfileChange,
   onModeChange,
   onLanguageChange,
   onNewChat,
+  onHistoryOpen,
   onMobileClose,
   onClose,
 }: SidebarProps) {
@@ -132,6 +136,34 @@ export function Sidebar({
         </label>
 
       </div>
+
+      {historyItems.length > 0 && (
+        <section className="mt-6 min-h-0 px-1">
+          <h2 className="mb-2 px-2 text-xs font-medium text-zinc-500">
+            {zh ? "最近对话" : "Recent chats"}
+          </h2>
+          <div className="max-h-48 space-y-1 overflow-y-auto pr-1">
+            {historyItems.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                disabled={disabled}
+                onClick={() => {
+                  onHistoryOpen(item.id)
+                  onMobileClose()
+                }}
+                className={`group flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left transition disabled:opacity-50 ${modeId === item.modeId ? "bg-white/65 text-[#44415d]" : "text-[#666278] hover:bg-white/45"}`}
+              >
+                <MessageSquareText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#85809e]" />
+                <span className="min-w-0">
+                  <span className="block truncate text-xs font-medium">{item.title}</span>
+                  <span className="mt-0.5 block truncate text-[11px] text-[#898695]">{item.preview}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="relative mx-1 mb-1 mt-auto overflow-hidden rounded-xl border border-[#dedbe9] bg-gradient-to-br from-white/70 via-[#f4f1fa]/75 to-[#fbf1e9]/65 p-4 shadow-[0_8px_24px_rgba(83,75,111,0.05)]">
         <div className="absolute right-3 top-3 h-1.5 w-1.5 rounded-full bg-[#dda06f]/70" aria-hidden="true" />
