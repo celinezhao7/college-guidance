@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
-import { BookOpenText, Compass, FilePenLine } from "lucide-react"
+import { BookOpenText, Compass, FilePenLine, Menu, Minus, Plus } from "lucide-react"
 
 import { ChatComposer } from "@/components/ChatComposer"
 import { ChatMessage, type Message } from "@/components/ChatMessage"
@@ -14,6 +14,13 @@ import {
   type CollegePreferences,
   type QuickReply,
 } from "@/lib/api"
+import {
+  annotateRecognizedPinyin,
+  detectInputLanguage,
+  isValidCollegeCount,
+  persistableConversation,
+  recommendationErrorMessage,
+} from "@/lib/uiLogic"
 
 const defaultCollegePreferences: CollegePreferences = {
   sat: null,
@@ -37,6 +44,37 @@ type PendingLanguageSwitch = {
   message: string
   target: "en" | "zh"
 } | null
+type ModeConversationState = {
+  input: string
+  messages: Message[]
+  collegePreferences: CollegePreferences
+  sessionId: string | null
+  collegeScenario: CollegeScenario
+  answeredPreferences: string[]
+  quickReplies: QuickReply[]
+  awaitingPreference: string | null
+}
+type StoredWorkspace = {
+  activeModeId: string
+  conversations: Record<string, ModeConversationState>
+}
+
+function emptyModeConversation(): ModeConversationState {
+  return {
+    input: "",
+    messages: [],
+    collegePreferences: { ...defaultCollegePreferences },
+    sessionId: null,
+    collegeScenario: null,
+    answeredPreferences: [],
+    quickReplies: [],
+    awaitingPreference: null,
+  }
+}
+
+function storageKey(profileId: string) {
+  return `college-guide:session:${profileId}`
+}
 
 function App() {
   const [input, setInput] = useState("")
@@ -58,7 +96,30 @@ function App() {
   const [awaitingPreference, setAwaitingPreference] = useState<string | null>(null)
   const [pendingLanguageSwitch, setPendingLanguageSwitch] = useState<PendingLanguageSwitch>(null)
   const [languageCheckBypass, setLanguageCheckBypass] = useState<string | null>(null)
+  const [inputError, setInputError] = useState("")
+  const [modeSwitchNotice, setModeSwitchNotice] = useState("")
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+  const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true)
+  const [storageHydrated, setStorageHydrated] = useState(false)
+  const [canStopGeneration, setCanStopGeneration] = useState(false)
   const scrollViewportRef = useRef<HTMLDivElement>(null)
+  const generationAbortRef = useRef<AbortController | null>(null)
+  const modeConversationsRef = useRef<Record<string, ModeConversationState>>({})
+  const submissionLockRef = useRef(false)
+  const hasShownModeSwitchNoticeRef = useRef(false)
+
+  useEffect(() => {
+    const phoneViewport = window.matchMedia("(max-width: 767px)")
+    const collapseOnPhone = (event?: MediaQueryListEvent) => {
+      if (event?.matches ?? phoneViewport.matches) {
+        setMobileSidebarOpen(false)
+      }
+    }
+
+    collapseOnPhone()
+    phoneViewport.addEventListener("change", collapseOnPhone)
+    return () => phoneViewport.removeEventListener("change", collapseOnPhone)
+  }, [])
 
   useEffect(() => {
     loadRecommendationOptions()
@@ -75,6 +136,47 @@ function App() {
       .finally(() => setIsLoadingOptions(false))
   }, [])
 
+  useEffect(() => {
+    if (!profileId) return
+    setStorageHydrated(false)
+    try {
+      const raw = sessionStorage.getItem(storageKey(profileId))
+      const stored = raw ? JSON.parse(raw) as StoredWorkspace : null
+      modeConversationsRef.current = stored?.conversations ?? {}
+      const restoredMode = stored?.activeModeId ?? ""
+      setModeId(restoredMode)
+      applyModeConversation(
+        modeConversationsRef.current[restoredMode] ?? emptyModeConversation(),
+      )
+    } catch {
+      modeConversationsRef.current = {}
+      setModeId("")
+      applyModeConversation(emptyModeConversation())
+    } finally {
+      setStorageHydrated(true)
+    }
+  }, [profileId])
+
+  useEffect(() => {
+    if (!profileId || !storageHydrated) return
+    const conversations = { ...modeConversationsRef.current }
+    if (modeId) {
+      conversations[modeId] = persistableConversation({
+        input,
+        messages,
+        collegePreferences,
+        sessionId,
+        collegeScenario,
+        answeredPreferences,
+        quickReplies,
+        awaitingPreference,
+      })
+    }
+    modeConversationsRef.current = conversations
+    const stored: StoredWorkspace = { activeModeId: modeId, conversations }
+    sessionStorage.setItem(storageKey(profileId), JSON.stringify(stored))
+  }, [answeredPreferences, awaitingPreference, collegePreferences, collegeScenario, input, messages, modeId, profileId, quickReplies, sessionId, storageHydrated])
+
   useLayoutEffect(() => {
     const viewport = scrollViewportRef.current
     if (!viewport) return
@@ -87,10 +189,17 @@ function App() {
     return () => cancelAnimationFrame(frame)
   }, [messages, isStreaming])
 
+  useEffect(() => {
+    if (!modeSwitchNotice) return
+    const timeout = setTimeout(() => setModeSwitchNotice(""), 3500)
+    return () => clearTimeout(timeout)
+  }, [modeSwitchNotice])
+
   async function handleSend() {
     const trimmedInput = input.trim()
     const isCollegeMode = modeId === "college_field"
-    if (!trimmedInput || !profileId || !modeId || isStreaming) return
+    if (!trimmedInput || !profileId || !modeId || isStreaming || submissionLockRef.current) return
+    setModeSwitchNotice("")
 
     const detectedLanguage = detectInputLanguage(trimmedInput)
     if (
@@ -103,8 +212,20 @@ function App() {
     }
     setPendingLanguageSwitch(null)
     setLanguageCheckBypass(null)
+    const semanticInput = annotateRecognizedPinyin(trimmedInput)
+
+    if (isCollegeMode && awaitingPreference === "count" && !isValidCollegeCount(trimmedInput)) {
+      setInputError(
+        language === "zh"
+          ? "请输入 1–20 之间的整数。"
+          : "Enter a whole number from 1 to 20.",
+      )
+      return
+    }
+    setInputError("")
 
     if (!isCollegeMode && isCasualGreeting(trimmedInput)) {
+      brieflyLockSubmission()
       const replyInChinese = language === "zh" || /[\u4e00-\u9fff]/.test(trimmedInput)
       setMessages((previous) => [
         ...previous,
@@ -126,6 +247,7 @@ function App() {
 
     const casualReply = getCasualFeedbackReply(trimmedInput, language)
     if (casualReply) {
+      brieflyLockSubmission()
       setMessages((previous) => [
         ...previous,
         { role: "user", content: trimmedInput },
@@ -135,7 +257,8 @@ function App() {
       return
     }
 
-    if (isClearlyUnclearMessage(trimmedInput, awaitingPreference)) {
+    if (isClearlyUnclearMessage(semanticInput, awaitingPreference)) {
+      brieflyLockSubmission()
       const replyInChinese = language === "zh" || /[\u4e00-\u9fff]/.test(trimmedInput)
       setMessages((previous) => [
         ...previous,
@@ -145,15 +268,20 @@ function App() {
           content: getUnclearInputReply(modeId, replyInChinese),
         },
       ])
+      if (isCollegeMode) {
+        setQuickReplies(getScenarioQuickReplies(replyInChinese ? "zh" : "en"))
+        setAwaitingPreference("scenario")
+      }
       setInput("")
       return
     }
 
     if (isCollegeMode) {
-      await handleCollegeMessage(trimmedInput)
+      await handleCollegeMessage(semanticInput, undefined, trimmedInput)
       return
     }
 
+    submissionLockRef.current = true
     setMessages((previous) => [
       ...previous,
       { role: "user", content: trimmedInput },
@@ -162,6 +290,12 @@ function App() {
     setInput("")
     setIsStreaming(true)
     setLoadingPhase("recommendation")
+    const recommendationHistory = messages
+      .filter((message) => message.content.trim())
+      .slice(-8)
+    const generationController = new AbortController()
+    generationAbortRef.current = generationController
+    setCanStopGeneration(true)
 
     try {
       await streamRecommendation(
@@ -169,8 +303,10 @@ function App() {
           profileId,
           mode: modeId,
           language,
-          query: trimmedInput,
+          query: semanticInput,
           collegePreferences: undefined,
+          history: recommendationHistory,
+          signal: generationController.signal,
         },
         (chunk) => {
           setMessages((previous) =>
@@ -182,28 +318,38 @@ function App() {
           )
         },
       )
-    } catch {
+    } catch (error) {
       setMessages((previous) =>
         previous.map((message, index) =>
           index === previous.length - 1
             ? {
                 ...message,
-                content:
-                  language === "zh"
-                    ? "抱歉，暂时无法生成推荐，请稍后重试。"
-                    : "Sorry, I couldn’t generate the recommendation right now. Please try again.",
+                content: isRecommendationCancelled(error)
+                  ? message.content || stoppedGenerationMessage(language)
+                  : recommendationErrorMessage(error, language),
               }
             : message,
         ),
       )
     } finally {
+      if (generationAbortRef.current === generationController) {
+        generationAbortRef.current = null
+      }
+      setCanStopGeneration(false)
       setIsStreaming(false)
       setLoadingPhase(null)
+      submissionLockRef.current = false
     }
   }
 
-  async function handleCollegeMessage(message: string, choiceId?: string) {
-    setMessages((previous) => [...previous, { role: "user", content: message }])
+  async function handleCollegeMessage(
+    message: string,
+    choiceId?: string,
+    displayedMessage = message,
+  ) {
+    if (submissionLockRef.current) return
+    submissionLockRef.current = true
+    setMessages((previous) => [...previous, { role: "user", content: displayedMessage }])
     setQuickReplies([])
     setInput("")
     setIsStreaming(true)
@@ -237,6 +383,9 @@ function App() {
           ...previous,
           { role: "assistant", content: "" },
         ])
+        const generationController = new AbortController()
+        generationAbortRef.current = generationController
+        setCanStopGeneration(true)
         await streamRecommendation(
           {
             profileId,
@@ -245,6 +394,7 @@ function App() {
             query: message,
             collegePreferences: response.preferences,
             collegeScenario: response.scenario,
+            signal: generationController.signal,
           },
           (chunk) => {
             setMessages((previous) =>
@@ -257,17 +407,30 @@ function App() {
           },
         )
       }
-    } catch {
-      setMessages((previous) => [
-        ...previous,
-        {
-          role: "assistant",
-          content: language === "zh" ? "抱歉，请求暂时无法完成，请稍后重试。" : "Sorry, I couldn’t complete that request right now. Please try again.",
-        },
-      ])
+    } catch (error) {
+      if (isRecommendationCancelled(error)) {
+        setMessages((previous) =>
+          previous.map((item, index) =>
+            index === previous.length - 1 && item.role === "assistant"
+              ? { ...item, content: item.content || stoppedGenerationMessage(language) }
+              : item,
+          ),
+        )
+      } else {
+        setMessages((previous) => [
+          ...previous,
+          {
+            role: "assistant",
+            content: recommendationErrorMessage(error, language),
+          },
+        ])
+      }
     } finally {
+      generationAbortRef.current = null
+      setCanStopGeneration(false)
       setIsStreaming(false)
       setLoadingPhase(null)
+      submissionLockRef.current = false
     }
   }
 
@@ -299,6 +462,13 @@ function App() {
           : "Find the PIQs that best showcase the student’s documented experiences. UC requires 4 of the 8 PIQs, with up to 350 words per response.",
       }[modeId]
     : undefined
+  const modeHistoryIds = modes
+    .filter((mode) => (
+      mode.id === modeId
+        ? messages.length > 0
+        : (modeConversationsRef.current[mode.id]?.messages.length ?? 0) > 0
+    ))
+    .map((mode) => mode.id)
 
   function handleLanguageChange(nextLanguage: "en" | "zh") {
     setLanguage(nextLanguage)
@@ -319,8 +489,25 @@ function App() {
     }))
   }
 
+  async function handleEditPreference(key: string, label: string) {
+    const message = language === "zh" ? `修改${label}` : `Change ${label}`
+    await handleCollegeMessage(message, `edit_${key}`)
+  }
+
+  function handleStopGeneration() {
+    generationAbortRef.current?.abort()
+  }
+
+  function brieflyLockSubmission() {
+    submissionLockRef.current = true
+    setTimeout(() => {
+      submissionLockRef.current = false
+    }, 400)
+  }
+
   function handleInputChange(value: string) {
     setInput(value)
+    setInputError("")
     if (pendingLanguageSwitch?.message !== value.trim()) {
       setPendingLanguageSwitch(null)
     }
@@ -330,6 +517,8 @@ function App() {
   }
 
   function handleNewChat() {
+    modeConversationsRef.current = {}
+    setInput("")
     setMessages([])
     setModeId("")
     setSessionId(null)
@@ -340,15 +529,92 @@ function App() {
     setAwaitingPreference(null)
     setPendingLanguageSwitch(null)
     setLanguageCheckBypass(null)
+    setInputError("")
+    setModeSwitchNotice("")
+    hasShownModeSwitchNoticeRef.current = false
     setCollegePreferences(defaultCollegePreferences)
   }
 
+  function resetConversationState() {
+    modeConversationsRef.current = {}
+    setInput("")
+    setMessages([])
+    setSessionId(null)
+    setCollegeScenario(null)
+    setLoadingPhase(null)
+    setAnsweredPreferences([])
+    setQuickReplies([])
+    setAwaitingPreference(null)
+    setPendingLanguageSwitch(null)
+    setLanguageCheckBypass(null)
+    setInputError("")
+    setModeSwitchNotice("")
+    hasShownModeSwitchNoticeRef.current = false
+  }
+
+  function handleProfileChange(nextProfileId: string) {
+    if (nextProfileId !== profileId) {
+      setStorageHydrated(false)
+      resetConversationState()
+    }
+    setProfileId(nextProfileId)
+  }
+
+  function handleModeChange(nextModeId: string) {
+    if (nextModeId === modeId) return
+    if (modeId) {
+      modeConversationsRef.current[modeId] = {
+        input,
+        messages,
+        collegePreferences,
+        sessionId,
+        collegeScenario,
+        answeredPreferences,
+        quickReplies,
+        awaitingPreference,
+      }
+      if (messages.length > 0 && !hasShownModeSwitchNoticeRef.current) {
+        setModeSwitchNotice(
+          language === "zh"
+            ? "当前功能的对话已保存，切换回来可以继续。"
+            : "This conversation was saved. Switch back anytime to continue.",
+        )
+        hasShownModeSwitchNoticeRef.current = true
+      }
+    }
+
+    const nextConversation = modeConversationsRef.current[nextModeId]
+      ?? emptyModeConversation()
+    applyModeConversation(nextConversation)
+    setModeId(nextModeId)
+  }
+
+  function applyModeConversation(nextConversation: ModeConversationState) {
+    setInput(nextConversation.input)
+    setMessages(nextConversation.messages)
+    setCollegePreferences(nextConversation.collegePreferences)
+    setSessionId(nextConversation.sessionId)
+    setCollegeScenario(nextConversation.collegeScenario)
+    setAnsweredPreferences(nextConversation.answeredPreferences)
+    setQuickReplies(nextConversation.quickReplies)
+    setAwaitingPreference(nextConversation.awaitingPreference)
+    setLoadingPhase(null)
+    setPendingLanguageSwitch(null)
+    setLanguageCheckBypass(null)
+    setInputError("")
+  }
+
   function toggleMode(nextModeId: string) {
-    setModeId((currentModeId) => currentModeId === nextModeId ? "" : nextModeId)
+    handleModeChange(modeId === nextModeId ? "" : nextModeId)
   }
 
   return (
-    <div className="dream-shell flex h-screen overflow-hidden text-zinc-900">
+    <div className="dream-shell flex h-[100dvh] min-h-[100dvh] overflow-hidden text-zinc-900">
+      {modeSwitchNotice && (
+        <div className="fixed left-1/2 top-4 z-50 -translate-x-1/2 rounded-full border border-[#d9d6e4] bg-white/95 px-4 py-2 text-sm text-[#5d5970] shadow-lg backdrop-blur" role="status">
+          {modeSwitchNotice}
+        </div>
+      )}
       <Sidebar
         profiles={profiles}
         modes={modes}
@@ -356,13 +622,48 @@ function App() {
         modeId={modeId}
         language={language}
         disabled={controlsDisabled}
-        onProfileChange={setProfileId}
-        onModeChange={setModeId}
+        mobileOpen={mobileSidebarOpen}
+        desktopOpen={desktopSidebarOpen}
+        modeHistoryIds={modeHistoryIds}
+        onProfileChange={handleProfileChange}
+        onModeChange={handleModeChange}
         onLanguageChange={handleLanguageChange}
         onNewChat={handleNewChat}
+        onMobileClose={() => setMobileSidebarOpen(false)}
+        onClose={() => {
+          setMobileSidebarOpen(false)
+          setDesktopSidebarOpen(false)
+        }}
       />
 
-      <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      {mobileSidebarOpen && (
+        <button
+          type="button"
+          className="fixed inset-0 z-30 bg-[#373348]/20 backdrop-blur-[1px] md:hidden"
+          onClick={() => setMobileSidebarOpen(false)}
+          aria-label={zh ? "点击背景关闭侧栏" : "Dismiss sidebar backdrop"}
+        />
+      )}
+
+      <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <button
+          type="button"
+          className="absolute left-4 top-[max(1rem,env(safe-area-inset-top))] z-20 flex h-10 w-10 items-center justify-center rounded-xl border border-[#dedbe9] bg-white/85 text-[#5d5970] shadow-sm backdrop-blur md:hidden"
+          onClick={() => setMobileSidebarOpen(true)}
+          aria-label={zh ? "打开菜单" : "Open menu"}
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        {!desktopSidebarOpen && (
+          <button
+            type="button"
+            className="absolute left-4 top-4 z-20 hidden h-10 w-10 items-center justify-center rounded-xl border border-[#dedbe9] bg-white/85 text-[#5d5970] shadow-sm backdrop-blur transition hover:bg-white md:flex"
+            onClick={() => setDesktopSidebarOpen(true)}
+            aria-label={zh ? "打开侧栏" : "Open sidebar"}
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+        )}
         {messages.length === 0 ? (
           <div className="flex flex-1 items-center justify-center px-6">
             <div className="w-full max-w-3xl">
@@ -429,6 +730,7 @@ function App() {
                   }}
                 />
               )}
+              {inputError && <p className="mb-2 text-sm text-red-600" role="alert">{inputError}</p>}
               <ChatComposer
                 input={input}
                 setInput={handleInputChange}
@@ -436,6 +738,9 @@ function App() {
                 disabled={composerDisabled}
                 requireInput
                 placeholder={zh ? "请输入关于大学、专业领域或申请的问题……" : "Ask about colleges, fields of study, or your application..."}
+                isGenerating={canStopGeneration}
+                onStop={handleStopGeneration}
+                stopLabel={zh ? "停止生成" : "Stop generating"}
               />
             </div>
           </div>
@@ -460,6 +765,8 @@ function App() {
                     preferences={collegePreferences}
                     answered={answeredPreferences}
                     language={language}
+                    disabled={isStreaming}
+                    onEdit={handleEditPreference}
                   />
                 )}
                 {modeId === "college_field" && !isStreaming && awaitingPreference === "competition" && (
@@ -469,7 +776,7 @@ function App() {
                       onSubmit={(min, max) => handleCollegeMessage(`${min}%–${max}%`)}
                     />
                 )}
-                {modeId === "college_field" && quickReplies.length > 0 && !isStreaming && awaitingPreference !== "competition" && (
+                {modeId === "college_field" && quickReplies.length > 0 && !isStreaming && awaitingPreference !== "competition" && awaitingPreference !== "count" && (
                     <div className="mb-3 flex flex-wrap gap-2" aria-label={zh ? "快捷回答" : "Quick replies"}>
                       {quickReplies.map((reply) => (
                         <button
@@ -482,6 +789,14 @@ function App() {
                         </button>
                       ))}
                     </div>
+                )}
+                {modeId === "college_field" && !isStreaming && awaitingPreference === "count" && (
+                  <CollegeCountInput
+                    language={language}
+                    disabled={isStreaming}
+                    initialValue={collegePreferences.count}
+                    onSubmit={(count) => handleCollegeMessage(String(count))}
+                  />
                 )}
                 {pendingLanguageSwitch && (
                   <LanguageSwitchPrompt
@@ -496,12 +811,16 @@ function App() {
                     }}
                   />
                 )}
+                {inputError && <p className="mb-2 text-sm text-red-600" role="alert">{inputError}</p>}
                 <ChatComposer
                   input={input}
                   setInput={handleInputChange}
                   onSend={handleSend}
                   disabled={composerDisabled}
                   placeholder={zh ? "请输入关于大学、专业或申请的问题……" : "Ask about colleges, majors, or your application..."}
+                  isGenerating={canStopGeneration}
+                  onStop={handleStopGeneration}
+                  stopLabel={zh ? "停止生成" : "Stop generating"}
                 />
               </div>
             </div>
@@ -558,16 +877,12 @@ function LanguageSwitchPrompt({
   )
 }
 
-function detectInputLanguage(message: string): "en" | "zh" | null {
-  const normalized = message.trim().toLowerCase().replace(/[^a-z]+/g, "")
-  if (["hi", "hey", "hello", "yo", "sup"].includes(normalized)) return "en"
+function isRecommendationCancelled(error: unknown) {
+  return error instanceof Error && error.message === "RECOMMENDATION_CANCELLED"
+}
 
-  const chineseCharacters = message.match(/[\u3400-\u9fff]/g)?.length ?? 0
-  if (chineseCharacters >= 2) return "zh"
-
-  const latinLetters = message.match(/[a-z]/gi)?.length ?? 0
-  if (chineseCharacters === 0 && latinLetters >= 4) return "en"
-  return null
+function stoppedGenerationMessage(language: "en" | "zh") {
+  return language === "zh" ? "已停止生成。" : "Generation stopped."
 }
 
 function getCasualFeedbackReply(message: string, language: "en" | "zh") {
@@ -615,7 +930,21 @@ function getUnclearInputReply(modeId: string, chinese: boolean) {
     : "Sorry, I didn’t understand that. This tool recommends UC PIQ prompts based on the student profile—tell me what you’d like help with."
 }
 
-function PreferenceSummary({ preferences, answered, language }: { preferences: CollegePreferences; answered: string[]; language: "en" | "zh" }) {
+function getScenarioQuickReplies(language: "en" | "zh"): QuickReply[] {
+  return language === "zh"
+    ? [
+        { id: "scenario_college", label: "我有目标大学" },
+        { id: "scenario_major", label: "我有目标专业" },
+        { id: "scenario_explore", label: "我还在探索" },
+      ]
+    : [
+        { id: "scenario_college", label: "I have a target college" },
+        { id: "scenario_major", label: "I have a target field" },
+        { id: "scenario_explore", label: "I’m still exploring" },
+      ]
+}
+
+function PreferenceSummary({ preferences, answered, language, disabled, onEdit }: { preferences: CollegePreferences; answered: string[]; language: "en" | "zh"; disabled: boolean; onEdit: (key: string, label: string) => void }) {
   const zh = language === "zh"
   const localizedValue = (value: string) => {
     if (!zh) return value
@@ -635,21 +964,32 @@ function PreferenceSummary({ preferences, answered, language }: { preferences: C
     }[value] ?? value
   }
   const labels: Record<string, string> = {
-    field: preferences.field,
-    states: preferences.states || (zh ? "州不限" : "Any state"),
-    max_cost: preferences.max_cost ? `$${preferences.max_cost.toLocaleString()}` : (zh ? "费用不限" : "No cost limit"),
-    size: localizedValue(preferences.size[0]),
-    competition: `${preferences.admission_rate_min}%–${preferences.admission_rate_max}%`,
-    sat: preferences.sat ? `SAT ${preferences.sat}` : (zh ? "未提供 SAT" : "SAT skipped"),
-    act: preferences.act ? `ACT ${preferences.act}` : (zh ? "未提供 ACT" : "ACT skipped"),
-    ownership: localizedValue(preferences.ownership[0]),
-    institution_format: localizedValue(preferences.institution_format[0]),
-    targets: preferences.targets,
-    count: zh ? `${preferences.count} 所学校` : `${preferences.count} schools`,
+    field: zh ? `专业：${preferences.field}` : `Field: ${preferences.field}`,
+    states: zh ? `地区：${preferences.states || "不限"}` : `Location: ${preferences.states || "Any"}`,
+    max_cost: zh ? `费用：${preferences.max_cost ? `$${preferences.max_cost.toLocaleString()}` : "不限"}` : `Cost: ${preferences.max_cost ? `$${preferences.max_cost.toLocaleString()}` : "Any"}`,
+    size: zh ? `规模：${localizedValue(preferences.size[0])}` : `Size: ${localizedValue(preferences.size[0])}`,
+    competition: zh ? `整体录取率：${preferences.admission_rate_min}%–${preferences.admission_rate_max}%` : `Overall admission rate: ${preferences.admission_rate_min}%–${preferences.admission_rate_max}%`,
+    sat: preferences.sat ? `SAT：${preferences.sat}` : (zh ? "SAT：未提供" : "SAT: skipped"),
+    act: preferences.act ? `ACT：${preferences.act}` : (zh ? "ACT：未提供" : "ACT: skipped"),
+    ownership: zh ? `性质：${localizedValue(preferences.ownership[0])}` : `Control: ${localizedValue(preferences.ownership[0])}`,
+    institution_format: zh ? `院校类型：${localizedValue(preferences.institution_format[0])}` : `Institution type: ${localizedValue(preferences.institution_format[0])}`,
+    targets: zh ? `目标大学：${preferences.targets}` : `Target: ${preferences.targets}`,
+    count: zh ? `数量：${preferences.count} 所` : `Count: ${preferences.count}`,
   }
   return (
     <div className="mb-3 flex flex-wrap gap-2">
-      {answered.map((key) => <span key={key} className="dream-chip rounded-full px-3 py-1 text-xs text-zinc-700">{labels[key]}</span>)}
+      {answered.filter((key) => labels[key]).map((key) => (
+        <button
+          key={key}
+          type="button"
+          className="dream-chip rounded-full px-3 py-1 text-xs text-zinc-700 transition hover:-translate-y-px hover:shadow-sm disabled:opacity-60"
+          disabled={disabled}
+          onClick={() => onEdit(key, labels[key])}
+          title={zh ? "点击修改" : "Click to edit"}
+        >
+          {labels[key]}
+        </button>
+      ))}
     </div>
   )
 }
@@ -657,6 +997,7 @@ function PreferenceSummary({ preferences, answered, language }: { preferences: C
 function AdmissionRateRange({ disabled, language, onSubmit }: { disabled: boolean; language: "en" | "zh"; onSubmit: (min: number, max: number) => void }) {
   const [min, setMin] = useState(0)
   const [max, setMax] = useState(100)
+  const [activeThumb, setActiveThumb] = useState<"min" | "max" | null>(null)
   const zh = language === "zh"
   const fill = { left: `${min}%`, right: `${100 - max}%` }
 
@@ -666,16 +1007,32 @@ function AdmissionRateRange({ disabled, language, onSubmit }: { disabled: boolea
         <span className="text-sm font-medium text-zinc-700">{zh ? "学校整体录取率范围" : "Overall admission-rate range"}</span>
         <span className="rounded-full bg-zinc-100 px-3 py-1 text-sm tabular-nums text-zinc-700">{min}%–{max}%</span>
       </div>
-      <div className="relative h-8" aria-label={zh ? "录取率范围" : "Admission-rate range"}>
-        <div className="absolute inset-x-0 top-3 h-2 rounded-full bg-zinc-200" />
-        <div className="admission-range-fill absolute top-3 h-2 rounded-full" style={fill} />
-        <input className="range-thumb absolute inset-x-0 top-0 w-full" type="range" min="0" max="100" step="1" value={min} disabled={disabled} aria-label={zh ? "最低录取率" : "Minimum admission rate"} onChange={(e) => setMin(Math.min(Number(e.target.value), max - 1))} />
-        <input className="range-thumb absolute inset-x-0 top-0 w-full" type="range" min="0" max="100" step="1" value={max} disabled={disabled} aria-label={zh ? "最高录取率" : "Maximum admission rate"} onChange={(e) => setMax(Math.max(Number(e.target.value), min + 1))} />
+      <div className="admission-range relative h-10" aria-label={zh ? "录取率范围" : "Admission-rate range"}>
+        <div className="admission-range-rail absolute inset-x-0 top-[17px] h-1.5 rounded-full" />
+        <div className="admission-range-fill absolute top-[17px] h-1.5 rounded-full" style={fill} />
+        <input className="range-thumb absolute inset-x-0 top-0 w-full" style={{ zIndex: activeThumb === "min" ? 5 : 3 }} type="range" min="0" max="100" step="1" value={min} disabled={disabled} aria-label={zh ? "最低录取率" : "Minimum admission rate"} onFocus={() => setActiveThumb("min")} onPointerDown={() => setActiveThumb("min")} onPointerUp={() => setActiveThumb(null)} onBlur={() => setActiveThumb(null)} onChange={(e) => setMin(Math.min(Number(e.target.value), max - 1))} />
+        <input className="range-thumb absolute inset-x-0 top-0 w-full" style={{ zIndex: activeThumb === "max" ? 5 : 4 }} type="range" min="0" max="100" step="1" value={max} disabled={disabled} aria-label={zh ? "最高录取率" : "Maximum admission rate"} onFocus={() => setActiveThumb("max")} onPointerDown={() => setActiveThumb("max")} onPointerUp={() => setActiveThumb(null)} onBlur={() => setActiveThumb(null)} onChange={(e) => setMax(Math.max(Number(e.target.value), min + 1))} />
       </div>
-      <div className="mt-1 flex items-center justify-between text-xs text-zinc-400"><span>0%</span><span>100%</span></div>
+      <div className="flex items-center justify-between px-0.5 text-xs tabular-nums text-zinc-400"><span>0%</span><span>100%</span></div>
       <div className="mt-3 flex items-center justify-between gap-3">
         <p className="text-xs text-zinc-500">{zh ? "这是学校整体录取率，不代表你的个人录取概率。" : "This is the school's overall rate, not your personal admission chance."}</p>
         <button type="button" className="quick-reply shrink-0" disabled={disabled} onClick={() => onSubmit(min, max)}>{zh ? "确认范围" : "Apply range"}</button>
+      </div>
+    </div>
+  )
+}
+
+function CollegeCountInput({ language, disabled, initialValue, onSubmit }: { language: "en" | "zh"; disabled: boolean; initialValue: number; onSubmit: (count: number) => void }) {
+  const [count, setCount] = useState(Math.min(20, Math.max(1, initialValue)))
+  const zh = language === "zh"
+  return (
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#e1dee9] bg-white/80 p-3 shadow-sm">
+      <span className="text-sm text-zinc-600">{zh ? "推荐数量" : "Number of colleges"}</span>
+      <div className="flex items-center gap-2">
+        <button type="button" className="flex h-9 w-9 items-center justify-center rounded-full border border-[#d7d3e1] bg-white text-[#625e70] hover:bg-[#f5f3f7] disabled:opacity-40" disabled={disabled || count <= 1} onClick={() => setCount((value) => Math.max(1, value - 1))} aria-label={zh ? "减少数量" : "Decrease count"}><Minus className="h-4 w-4" /></button>
+        <input className="h-9 w-14 rounded-lg border border-[#d7d3e1] bg-white text-center text-sm tabular-nums outline-none focus:border-[#9993b7] focus:ring-2 focus:ring-[#b8b4d8]/25" type="number" min="1" max="20" value={count} disabled={disabled} onChange={(event) => setCount(Math.min(20, Math.max(1, Number(event.target.value) || 1)))} aria-label={zh ? "推荐大学数量" : "College count"} />
+        <button type="button" className="flex h-9 w-9 items-center justify-center rounded-full border border-[#d7d3e1] bg-white text-[#625e70] hover:bg-[#f5f3f7] disabled:opacity-40" disabled={disabled || count >= 20} onClick={() => setCount((value) => Math.min(20, value + 1))} aria-label={zh ? "增加数量" : "Increase count"}><Plus className="h-4 w-4" /></button>
+        <button type="button" className="quick-reply ml-1" disabled={disabled} onClick={() => onSubmit(count)}>{zh ? "确认" : "Apply"}</button>
       </div>
     </div>
   )

@@ -12,6 +12,8 @@ class UserMessageContextTests(unittest.TestCase):
         self.assertIn("Do not claim that an experience is absent", USER_MESSAGE_POLICY)
         self.assertIn("you mentioned", USER_MESSAGE_POLICY)
         self.assertIn("do not manufacture a full ranked recommendation list", USER_MESSAGE_POLICY)
+        self.assertIn("not establish what the student did", USER_MESSAGE_POLICY)
+        self.assertIn('Do not label such a minimally', USER_MESSAGE_POLICY)
 
 
 if __name__ == "__main__":

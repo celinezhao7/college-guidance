@@ -1,4 +1,4 @@
-import { ArrowUp } from "lucide-react"
+import { ArrowUp, Square } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -10,6 +10,9 @@ type ChatComposerProps = {
   disabled?: boolean
   requireInput?: boolean
   placeholder?: string
+  isGenerating?: boolean
+  onStop?: () => void
+  stopLabel?: string
 }
 
 export function ChatComposer({
@@ -19,6 +22,9 @@ export function ChatComposer({
   disabled = false,
   requireInput = true,
   placeholder = "Ask about colleges, majors, or your application...",
+  isGenerating = false,
+  onStop,
+  stopLabel = "Stop generating",
 }: ChatComposerProps) {
   return (
     <div className="dream-composer w-full rounded-3xl border p-3 shadow-[0_12px_32px_rgba(72,65,94,0.08)]">
@@ -37,14 +43,25 @@ export function ChatComposer({
       />
 
       <div className="flex justify-end">
-        <Button
-          size="icon"
-          onClick={onSend}
-          disabled={disabled || (requireInput && !input.trim())}
-          className="dream-send h-9 w-9 rounded-full border-0 text-white"
-        >
-          <ArrowUp className="h-4 w-4" />
-        </Button>
+        {isGenerating && onStop ? (
+          <Button
+            size="icon"
+            onClick={onStop}
+            aria-label={stopLabel}
+            className="h-9 w-9 rounded-full border border-[#c9c6d6] bg-white text-[#625e70] shadow-sm hover:bg-[#f3f2f6]"
+          >
+            <Square className="h-3.5 w-3.5 fill-current" />
+          </Button>
+        ) : (
+          <Button
+            size="icon"
+            onClick={onSend}
+            disabled={disabled || (requireInput && !input.trim())}
+            className="dream-send h-9 w-9 rounded-full border-0 text-white"
+          >
+            <ArrowUp className="h-4 w-4" />
+          </Button>
+        )}
       </div>
     </div>
   )

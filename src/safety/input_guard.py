@@ -6,6 +6,7 @@ a later model-based classifier is added.
 """
 
 import re
+import unicodedata
 
 from .models import SafetyAction, SafetyCategory, SafetyResult, SafetySource
 
@@ -70,6 +71,33 @@ _SENSITIVE_EXPERIENCE = re.compile(
     re.IGNORECASE,
 )
 
+_ZERO_WIDTH = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060\ufeff]")
+_CJK_SEPARATORS = re.compile(
+    r"(?<=[\u3400-\u9fff])[\s._·•—-]+(?=[\u3400-\u9fff])"
+)
+_OBFUSCATABLE_TERMS = (
+    "ignore", "disregard", "override", "reveal", "hack", "phish", "steal",
+    "fraud", "scam", "malware", "ransomware", "poison", "murder", "attack",
+    "suicide",
+)
+
+
+def _normalize_for_scan(text: str) -> str:
+    normalized = unicodedata.normalize("NFKC", text)
+    normalized = _ZERO_WIDTH.sub("", normalized)
+    while _CJK_SEPARATORS.search(normalized):
+        normalized = _CJK_SEPARATORS.sub("", normalized)
+
+    for term in _OBFUSCATABLE_TERMS:
+        spelled = r"[\s._-]*".join(map(re.escape, term))
+        normalized = re.sub(
+            rf"(?<![A-Za-z]){spelled}(?![A-Za-z])",
+            term,
+            normalized,
+            flags=re.IGNORECASE,
+        )
+    return normalized
+
 
 def _redact_secrets(text: str) -> str:
     redacted = text
@@ -108,7 +136,9 @@ def validate_input(text: str, source_type: str | SafetySource) -> SafetyResult:
     if not text.strip():
         return _result(source, SafetyCategory.SAFE, SafetyAction.ALLOW, "Empty input.")
 
-    if _PROMPT_INJECTION.search(text):
+    scan_text = _normalize_for_scan(text)
+
+    if _PROMPT_INJECTION.search(scan_text):
         return _result(
             source,
             SafetyCategory.PROMPT_INJECTION,
@@ -116,7 +146,7 @@ def validate_input(text: str, source_type: str | SafetySource) -> SafetyResult:
             "The text attempts to override or expose system instructions.",
         )
 
-    if any(pattern.search(text) for pattern in _SECRET_PATTERNS):
+    if any(pattern.search(scan_text) for pattern in _SECRET_PATTERNS):
         if source is SafetySource.STUDENT_KB:
             return _result(
                 source,
@@ -129,7 +159,9 @@ def validate_input(text: str, source_type: str | SafetySource) -> SafetyResult:
             SafetyCategory.PII_SECRET,
             SafetyAction.REDACT,
             "High-risk personal or secret data was detected and should be redacted.",
-            sanitized_text=_redact_secrets(text),
+            sanitized_text=(
+                redacted if (redacted := _redact_secrets(text)) != text else "[REDACTED]"
+            ),
         )
 
     harmful_categories = (
@@ -140,7 +172,7 @@ def validate_input(text: str, source_type: str | SafetySource) -> SafetyResult:
         (SafetyCategory.ILLEGAL_HARMFUL, _ILLEGAL_HARMFUL),
     )
     for category, pattern in harmful_categories:
-        if pattern.search(text) and _REQUEST_INTENT.search(text):
+        if pattern.search(scan_text) and _REQUEST_INTENT.search(scan_text):
             action = SafetyAction.BLOCK if source is SafetySource.CHAT else SafetyAction.WARN
             return _result(
                 source,
@@ -151,8 +183,8 @@ def validate_input(text: str, source_type: str | SafetySource) -> SafetyResult:
                 else "Potentially harmful content was found in student evidence and requires review.",
             )
 
-    if _SENSITIVE_EXPERIENCE.search(text) or any(
-        pattern.search(text) for _, pattern in harmful_categories
+    if _SENSITIVE_EXPERIENCE.search(scan_text) or any(
+        pattern.search(scan_text) for _, pattern in harmful_categories
     ):
         return _result(
             source,

@@ -8,6 +8,7 @@ from .grounding_guard import (
     extract_experience_labels,
     find_ungrounded_experience_references,
 )
+from .fact_guard import find_ungrounded_college_facts
 from .models import SafetyAction, SafetyCategory
 from .input_guard import validate_input
 from .output_models import OutputAction, OutputCategory, OutputSafetyResult
@@ -52,6 +53,7 @@ _RETRYABLE_CATEGORIES = {
     OutputCategory.INTERNAL_DATA,
     OutputCategory.POLICY_VIOLATION,
     OutputCategory.UNGROUNDED_REFERENCE,
+    OutputCategory.UNGROUNDED_FACT,
 }
 
 
@@ -67,6 +69,8 @@ def validate_generated_output(
     *,
     application_type: str,
     reference_text: str = "",
+    fact_reference: dict | None = None,
+    final: bool = True,
 ) -> OutputSafetyResult:
     """Validate one not-yet-visible paragraph of generated output."""
     input_safety = validate_input(text, "chat")
@@ -85,6 +89,14 @@ def validate_generated_output(
             OutputAction.BLOCK,
             "Generated text contains harmful instructional content.",
             "",
+        )
+    if input_safety.action is SafetyAction.REDACT:
+        return OutputSafetyResult(
+            True,
+            OutputCategory.PII_SECRET,
+            OutputAction.REDACT,
+            "A secret or high-risk identifier was removed.",
+            input_safety.sanitized_text or "[REDACTED]",
         )
     if any(pattern.search(text) for pattern in _SECRET_PATTERNS):
         return OutputSafetyResult(
@@ -129,6 +141,19 @@ def validate_generated_output(
             f"Unknown or altered evidence labels: {', '.join(ungrounded)}.",
             "",
         )
+    ungrounded_facts = find_ungrounded_college_facts(
+        text,
+        fact_reference,
+        final=final,
+    )
+    if ungrounded_facts:
+        return OutputSafetyResult(
+            False,
+            OutputCategory.UNGROUNDED_FACT,
+            OutputAction.BLOCK,
+            f"Generated college facts are not present in the supplied records: {'; '.join(ungrounded_facts)}.",
+            "",
+        )
     return OutputSafetyResult(
         True,
         OutputCategory.SAFE,
@@ -145,6 +170,7 @@ def guarded_output_stream(
     language: str,
     reference_text: str = "",
     retry_factory: Callable[[], Iterable[str]] | None = None,
+    fact_reference: dict | None = None,
 ) -> Iterator[str]:
     """Stream validated text while retaining a small cross-chunk safety window."""
     buffer = ""
@@ -168,6 +194,8 @@ def guarded_output_stream(
             buffer,
             application_type=application_type,
             reference_text=reference_text,
+            fact_reference=fact_reference,
+            final=False,
         )
         if not full_result.allowed:
             _log_block(full_result, application_type)
@@ -181,6 +209,7 @@ def guarded_output_stream(
                     application_type=application_type,
                     language=language,
                     reference_text=reference_text,
+                    fact_reference=fact_reference,
                 )
                 return
             yield _fallback(language, full_result.category)
@@ -194,6 +223,8 @@ def guarded_output_stream(
             segment,
             application_type=application_type,
             reference_text=reference_text,
+            fact_reference=fact_reference,
+            final=False,
         )
         if (
             full_result.action is OutputAction.REDACT
@@ -214,6 +245,8 @@ def guarded_output_stream(
             buffer,
             application_type=application_type,
             reference_text=reference_text,
+            fact_reference=fact_reference,
+            final=True,
         )
         if not result.allowed:
             _log_block(result, application_type)
@@ -227,6 +260,7 @@ def guarded_output_stream(
                     application_type=application_type,
                     language=language,
                     reference_text=reference_text,
+                    fact_reference=fact_reference,
                 )
                 return
             yield _fallback(language, result.category)
@@ -278,7 +312,10 @@ def _log_block(result: OutputSafetyResult, application_type: str) -> None:
 
 
 def _fallback(language: str, category: OutputCategory) -> str:
-    accuracy_failure = category is OutputCategory.UNGROUNDED_REFERENCE
+    accuracy_failure = category in {
+        OutputCategory.UNGROUNDED_REFERENCE,
+        OutputCategory.UNGROUNDED_FACT,
+    }
     if language == "zh":
         return (
             "抱歉，我无法根据现有学生资料验证这份答案，因此没有显示可能不准确的内容。请补充资料或换一种更明确的问法。"

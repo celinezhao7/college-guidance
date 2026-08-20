@@ -810,6 +810,27 @@ def chat(
             naturalize=False,
         )
 
+    if choice_id and choice_id.startswith("edit_"):
+        preference_key = choice_id.removeprefix("edit_")
+        editable = set(QUESTION_ORDERS.get(conversation.scenario or "", []))
+        if preference_key not in editable:
+            return _response(
+                conversation,
+                "That preference cannot be edited here."
+                if conversation.language == "en"
+                else "当前无法在这里修改这项偏好。",
+                naturalize=False,
+            )
+        conversation.answered.discard(preference_key)
+        conversation.awaiting = preference_key
+        if preference_key == "field":
+            conversation.proposed_field = None
+        return _response(
+            conversation,
+            _question(conversation, preference_key),
+            naturalize=False,
+        )
+
     if choice_id:
         message = "none" if choice_id == "no_target" else CHOICE_VALUES.get(choice_id, message)
     conversation.last_user_message = message.strip()

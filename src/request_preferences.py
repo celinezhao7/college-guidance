@@ -26,8 +26,8 @@ _CHINESE_NUMBERS = {
 }
 
 
-def requested_recommendation_count(query: str, application_type: str) -> int:
-    default, maximum = (4, 8) if application_type == "uc" else (3, 7)
+def explicit_recommendation_count(query: str, application_type: str) -> int | None:
+    _, maximum = (4, 8) if application_type == "uc" else (3, 7)
     lowered = query.lower()
 
     digit_match = re.search(
@@ -61,7 +61,45 @@ def requested_recommendation_count(query: str, application_type: str) -> int:
         word = next(group for group in chinese_match.groups() if group)
         return min(_CHINESE_NUMBERS[word], maximum)
 
-    return default
+    return None
+
+
+def requested_recommendation_count(query: str, application_type: str) -> int:
+    default = 4 if application_type == "uc" else 3
+    return explicit_recommendation_count(query, application_type) or default
+
+
+def conversational_recommendation_count(
+    query: str,
+    application_type: str,
+    prior_user_messages: list[str] | tuple[str, ...] = (),
+) -> int:
+    """Use the current explicit count, then the most recent prior count."""
+    current = explicit_recommendation_count(query, application_type)
+    if current is not None:
+        return current
+    for message in reversed(prior_user_messages):
+        previous = explicit_recommendation_count(message, application_type)
+        if previous is not None:
+            return previous
+    return 4 if application_type == "uc" else 3
+
+
+def prior_recommended_prompt_numbers(
+    history: list[dict[str, str]],
+    application_type: str,
+) -> list[int]:
+    """Extract already-visible recommendation numbers from assistant turns only."""
+    label = r"PIQ" if application_type == "uc" else r"(?:Common\s+App\s+)?Prompt"
+    found: list[int] = []
+    for turn in history:
+        if turn.get("role") != "assistant":
+            continue
+        for match in re.finditer(rf"\b{label}\s*#\s*(\d+)\b", turn.get("content", ""), re.I):
+            number = int(match.group(1))
+            if number not in found:
+                found.append(number)
+    return found
 
 
 def explicitly_requested_mode(query: str) -> str | None:

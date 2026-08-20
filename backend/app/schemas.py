@@ -28,13 +28,20 @@ class ModeResponse(BaseModel):
 class ModesResponse(BaseModel):
     modes: list[ModeResponse]
 
+
+class RecommendationTurn(BaseModel):
+    role: str
+    content: str = Field(max_length=20_000)
+
+
 class RecommendationRequest(BaseModel):
     profile_id: str
     mode: str
     language: str = "en"
-    query: str = ""
+    query: str = Field(default="", max_length=5_000)
     college_preferences: "CollegePreferences | None" = None
     college_scenario: str | None = None
+    history: list[RecommendationTurn] = Field(default_factory=list, max_length=8)
 
 
 class CollegePreferences(BaseModel):
@@ -57,7 +64,7 @@ class ChatRequest(BaseModel):
     session_id: str | None = None
     profile_id: str
     language: str = "en"
-    message: str = ""
+    message: str = Field(default="", max_length=5_000)
     choice_id: str | None = None
 
 

@@ -4,7 +4,7 @@ Exposes API endpoints for system metadata, student profiles,
 recommendation modes, and streaming recommendation generation.
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
@@ -12,6 +12,8 @@ from pathlib import Path
 from src.recommend import is_student_profile_indexed, stream_recommendation
 
 from .profile_service import get_profile, list_profiles
+from .rate_limit import enforce_rate_limit
+from .streaming import resilient_stream
 from .conversation_service import chat as continue_conversation
 from .schemas import (
     ChatRequest,
@@ -79,22 +81,23 @@ def modes() -> ModesResponse:
 
 
 @app.post("/api/recommend", tags=["recommendations"])
-def recommend(request: RecommendationRequest):
+def recommend(payload: RecommendationRequest, request: Request):
+    enforce_rate_limit(request, "recommend")
     mode_map = {
         "uc_piq": "uc",
         "common_app": "common_app",
         "college_field": "college_major",
     }
 
-    application_type = mode_map.get(request.mode)
+    application_type = mode_map.get(payload.mode)
 
     if application_type is None:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported recommendation mode: {request.mode}",
+            detail=f"Unsupported recommendation mode: {payload.mode}",
         )
 
-    profile = get_profile(request.profile_id)
+    profile = get_profile(payload.profile_id)
     if profile is None:
         raise HTTPException(
             status_code=404,
@@ -110,34 +113,39 @@ def recommend(request: RecommendationRequest):
             ),
         )
 
-    return StreamingResponse(
-        stream_recommendation(
+    def recommendation_factory():
+        return stream_recommendation(
             profile_name=profile.filename,
             application_type=application_type,
-            language=request.language,
-            query=request.query,
+            language=payload.language,
+            query=payload.query,
             college_preferences=(
-                request.college_preferences.model_dump()
-                if request.college_preferences
+                payload.college_preferences.model_dump()
+                if payload.college_preferences
                 else None
             ),
-            college_scenario=request.college_scenario,
-        ),
+            college_scenario=payload.college_scenario,
+            history=[turn.model_dump() for turn in payload.history],
+        )
+
+    return StreamingResponse(
+        resilient_stream(recommendation_factory, language=payload.language),
         media_type="text/plain",
     )
 
 
 @app.post("/api/chat", response_model=ChatResponse, tags=["chat"])
-def chat(request: ChatRequest) -> ChatResponse:
-    if get_profile(request.profile_id) is None:
+def chat(payload: ChatRequest, request: Request) -> ChatResponse:
+    enforce_rate_limit(request, "chat")
+    if get_profile(payload.profile_id) is None:
         raise HTTPException(status_code=404, detail="Student profile not found.")
     return ChatResponse.model_validate(
         continue_conversation(
-            session_id=request.session_id,
-            profile_id=request.profile_id,
-            language=request.language,
-            message=request.message,
-            choice_id=request.choice_id,
+            session_id=payload.session_id,
+            profile_id=payload.profile_id,
+            language=payload.language,
+            message=payload.message,
+            choice_id=payload.choice_id,
         )
     )
 

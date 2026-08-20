@@ -32,14 +32,45 @@ export type QuickReply = {
   label: string
 }
 
+const RECOMMENDATION_TOTAL_TIMEOUT_MS = 180_000
+const RECOMMENDATION_IDLE_TIMEOUT_MS = 45_000
+
 type ProfilesResponse = { profiles: Profile[] }
 type ModesResponse = { modes: RecommendationMode[] }
+
+export class ApiError extends Error {
+  status: number
+  retryAfter: number | null
+
+  constructor(
+    status: number,
+    message: string,
+    retryAfter: number | null = null,
+  ) {
+    super(message)
+    this.name = "ApiError"
+    this.status = status
+    this.retryAfter = retryAfter
+  }
+}
+
+async function responseError(response: Response) {
+  const payload = (await response.json().catch(() => null)) as
+    | { detail?: string }
+    | null
+  const retryAfter = Number(response.headers.get("Retry-After"))
+  return new ApiError(
+    response.status,
+    payload?.detail ?? `Request failed (${response.status})`,
+    Number.isFinite(retryAfter) ? retryAfter : null,
+  )
+}
 
 async function requestJson<T>(path: string): Promise<T> {
   const response = await fetch(path)
 
   if (!response.ok) {
-    throw new Error(`Request failed (${response.status})`)
+    throw await responseError(response)
   }
 
   return response.json() as Promise<T>
@@ -65,9 +96,21 @@ export async function streamRecommendation(
     query: string
     collegePreferences?: CollegePreferences
     collegeScenario?: string | null
+    history?: Array<{ role: "user" | "assistant"; content: string }>
+    signal?: AbortSignal
   },
   onChunk: (text: string) => void,
 ) {
+  const controller = new AbortController()
+  const totalTimeout = setTimeout(
+    () => controller.abort("total-timeout"),
+    RECOMMENDATION_TOTAL_TIMEOUT_MS,
+  )
+  const cancelFromCaller = () => controller.abort("user-cancelled")
+  if (request.signal?.aborted) cancelFromCaller()
+  request.signal?.addEventListener("abort", cancelFromCaller, { once: true })
+
+  try {
   const response = await fetch("/api/recommend", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -78,14 +121,13 @@ export async function streamRecommendation(
       query: request.query,
       college_preferences: request.collegePreferences,
       college_scenario: request.collegeScenario,
+      history: request.history ?? [],
     }),
+    signal: controller.signal,
   })
 
   if (!response.ok) {
-    const payload = (await response.json().catch(() => null)) as
-      | { detail?: string }
-      | null
-    throw new Error(payload?.detail ?? `Request failed (${response.status})`)
+    throw await responseError(response)
   }
 
   if (!response.body) {
@@ -111,7 +153,23 @@ export async function streamRecommendation(
   }
 
   while (true) {
-    const { done, value } = await reader.read()
+    let idleTimeout: ReturnType<typeof setTimeout> | null = null
+    const idleFailure = new Promise<never>((_, reject) => {
+      idleTimeout = setTimeout(
+        () => {
+          controller.abort("idle-timeout")
+          reject(new Error("RECOMMENDATION_TIMEOUT"))
+        },
+        RECOMMENDATION_IDLE_TIMEOUT_MS,
+      )
+    })
+    let readResult: ReadableStreamReadResult<Uint8Array>
+    try {
+      readResult = await Promise.race([reader.read(), idleFailure])
+    } finally {
+      if (idleTimeout !== null) clearTimeout(idleTimeout)
+    }
+    const { done, value } = readResult
     if (done) break
     queueForRender(decoder.decode(value, { stream: true }))
   }
@@ -120,6 +178,21 @@ export async function streamRecommendation(
   if (finalChunk) pendingText += finalChunk
   if (flushTimer !== null) clearTimeout(flushTimer)
   flush()
+  } catch (error) {
+    if (controller.signal.aborted && controller.signal.reason === "user-cancelled") {
+      throw new Error("RECOMMENDATION_CANCELLED", { cause: error })
+    }
+    if (
+      controller.signal.aborted
+      || (error instanceof Error && error.message === "RECOMMENDATION_TIMEOUT")
+    ) {
+      throw new Error("RECOMMENDATION_TIMEOUT", { cause: error })
+    }
+    throw error
+  } finally {
+    clearTimeout(totalTimeout)
+    request.signal?.removeEventListener("abort", cancelFromCaller)
+  }
 }
 
 export async function continueCollegeConversation(request: {
@@ -141,8 +214,7 @@ export async function continueCollegeConversation(request: {
     }),
   })
   if (!response.ok) {
-    const payload = (await response.json().catch(() => null)) as { detail?: string } | null
-    throw new Error(payload?.detail ?? `Request failed (${response.status})`)
+    throw await responseError(response)
   }
   return response.json() as Promise<{
     session_id: string

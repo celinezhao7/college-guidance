@@ -102,8 +102,21 @@ For each recommendation provide: field name, fit level, why it fits, supporting
 evidence, skills/interests it develops, evidence limitations, and one question
 the student should investigate while exploring specific majors within the field.
 Do not predict admission or career outcomes, and do not claim experience that is
-not documented. End with a short comparison of the top two fields and one concise
-next step telling the student to explore exact majors on university websites."""
+not documented.
+
+Markdown format rules:
+- Start each recommendation with `## 1. Field Name`, using the correct number.
+- Put every label on its own line in bold, followed by a blank line and its content:
+  `**Fit level:**`, `**Why it fits:**`, `**Skills/interests it develops:**`,
+  `**Evidence limitations:**`, and `**Question to investigate:**`.
+- Use `### Supporting evidence` as a separate heading, then put each experience
+  on its own bullet. Never place two labels or a label and its value on one line.
+- Separate recommendations with `---`.
+- End with separate `## Comparison of the top two fields` and `## Next step`
+  sections. Never append their content to the heading line.
+
+End with a short comparison of the top two fields and one concise next step telling
+the student to explore exact majors on university websites."""
 
 CIP_FIELD_SYSTEM_PROMPT = MAJOR_SYSTEM_PROMPT + """
 
@@ -374,6 +387,7 @@ def stream_majors_at_target_colleges(
     student_context: str,
     targets: str,
     language="en",
+    fact_reference: dict | None = None,
 ):
     """Non-interactive web version of the terminal college-first branch."""
     catalog = load_school_catalog()
@@ -408,6 +422,14 @@ def stream_majors_at_target_colleges(
         }
         for school in unique_schools.values()
     ]
+    if fact_reference is not None:
+        fact_reference["schools"] = [
+            {
+                "name": record["school"],
+                "fields": [field["title"] for field in record["bachelors_fields"]],
+            }
+            for record in records
+        ]
     prompt = f"""=== DOCUMENTED STUDENT EVIDENCE ===
 {student_context}
 
@@ -1307,6 +1329,7 @@ def stream_college_recommendations(
     student_context: str,
     preferences: dict,
     language="en",
+    fact_reference: dict | None = None,
 ):
     """Run the terminal college recommendation pipeline with web form values."""
     started_at = time.perf_counter()
@@ -1400,7 +1423,29 @@ def stream_college_recommendations(
                 yield "No sufficiently supported alternatives were found either.\n"
             yield "\nTry expanding the states, raising the cost limit, allowing any school size or selectivity, or using a broader field name."
         return
+    if final_count < requested_count:
+        school_noun = "college" if final_count == 1 else "colleges"
+        yield (
+            f"当前条件下只找到 {final_count} 所有充分 College Scorecard 数据支持的匹配大学，少于你请求的 {requested_count} 所；为保证质量，没有补充不符合条件的学校。\n\n"
+            if language == "zh"
+            else f"Only {final_count} {school_noun} had sufficiently matching College Scorecard data under your current filters, fewer than the {requested_count} requested; no weaker matches were added just to reach the requested count.\n\n"
+        )
     verified_candidates = verified_candidates[:final_count]
+    if fact_reference is not None:
+        fact_reference["schools"] = [
+            {
+                "name": college.get("school.name"),
+                "admission_rate": college.get("latest.admissions.admission_rate.overall"),
+                "cost": college.get("latest.cost.attendance.academic_year"),
+                "net_price": college.get("latest.cost.avg_net_price.overall"),
+                "size": college.get("latest.student.size"),
+                "fields": [
+                    field["title"]
+                    for field in college.get("matching_bachelors_fields", [])
+                ],
+            }
+            for college in verified_candidates
+        ]
     preparation_seconds = time.perf_counter() - started_at
     if os.getenv("COLLEGE_GUIDANCE_DEBUG", "").lower() in {"1", "true", "yes"}:
         print(f"Web college recommendation preparation: {preparation_seconds:.2f}s")
@@ -1414,8 +1459,8 @@ def stream_college_recommendations(
 {json.dumps(verified_candidates, ensure_ascii=False, indent=2)}
 
 Recommend exactly {final_count} schools. You requested {requested_count}.
-If fewer are returned, state that only {final_count} had sufficiently matching
-Scorecard data under the selected filters. Do not derive an admission probability
+If fewer are returned, the application has already shown the user a count notice;
+do not repeat it. Do not derive an admission probability
 or Reach, Target, Safety, or Likely label from scores or overall admission rate.
 The requested target is {preferences.get("targets", "")!r}; only that school or
 system may be labeled as a target."""

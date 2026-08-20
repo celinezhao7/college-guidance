@@ -1,4 +1,4 @@
-import { GraduationCap, Plus, ShieldCheck } from "lucide-react"
+import { Plus, ShieldCheck, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import type { Profile, RecommendationMode } from "@/lib/api"
@@ -10,14 +10,21 @@ type SidebarProps = {
   modeId: string
   language: "en" | "zh"
   disabled: boolean
+  mobileOpen: boolean
+  desktopOpen: boolean
+  modeHistoryIds: string[]
   onProfileChange: (value: string) => void
   onModeChange: (value: string) => void
   onLanguageChange: (value: "en" | "zh") => void
   onNewChat: () => void
+  onMobileClose: () => void
+  onClose: () => void
 }
 
 const selectClassName =
   "h-10 w-full rounded-lg border border-[#dddce7] bg-white/75 px-3 py-2 text-sm shadow-[0_2px_10px_rgba(84,78,112,0.035)] outline-none transition focus:border-[#aaa6ca] focus:ring-2 focus:ring-[#b8b4d8]/20 disabled:opacity-50"
+const headerControlClassName =
+  "flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[#d5d2e2] bg-white/55 text-xs font-medium text-[#625e70] transition hover:border-[#aaa6ca] hover:bg-white/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b8b4d8]/35 disabled:opacity-50"
 
 export function Sidebar({
   profiles,
@@ -26,49 +33,73 @@ export function Sidebar({
   modeId,
   language,
   disabled,
+  mobileOpen,
+  desktopOpen,
+  modeHistoryIds,
   onProfileChange,
   onModeChange,
   onLanguageChange,
   onNewChat,
+  onMobileClose,
+  onClose,
 }: SidebarProps) {
   const zh = language === "zh"
   return (
-    <aside className="dream-sidebar flex w-72 flex-col border-r border-[#e3e1ea] p-3">
-      <div className="flex items-center gap-2.5 px-2 pb-5 pt-2">
-        <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/70 text-[#5f5b82] shadow-sm">
-          <GraduationCap className="h-4.5 w-4.5" />
-        </div>
-        <span className="font-heading text-xl font-semibold tracking-tight text-[#3f3d58]">
+    <aside
+      className={`dream-sidebar fixed left-0 top-0 z-40 flex h-[100dvh] w-72 max-w-[calc(100vw-1rem)] flex-col border-r border-[#e3e1ea] px-3 transition-[transform,visibility] duration-200 md:relative md:z-auto md:h-[100dvh] md:max-w-none ${mobileOpen ? "visible translate-x-0" : "invisible pointer-events-none -translate-x-full"} ${desktopOpen ? "md:visible md:flex md:pointer-events-auto md:translate-x-0" : "md:hidden"}`}
+      style={{
+        paddingTop: "max(0.75rem, env(safe-area-inset-top))",
+        paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))",
+      }}
+    >
+      <div className="flex min-w-0 items-center gap-2.5 px-2 pb-5 pt-2">
+        <span className="dream-brand-title min-w-0 truncate font-heading text-xl font-semibold tracking-tight">
           CollegeGuide
         </span>
-        <button
-          type="button"
-          className="ml-auto flex h-8 min-w-8 items-center justify-center rounded-full border border-[#d5d2e2] bg-white/55 px-2 text-xs font-medium text-[#55516f] transition hover:border-[#aaa6ca] hover:bg-gradient-to-r hover:from-[#eef1fa] hover:to-[#faeee7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b8b4d8]/35 disabled:opacity-50"
-          disabled={disabled}
-          onClick={() => onLanguageChange(zh ? "en" : "zh")}
-          aria-label={zh ? "切换到英文" : "Switch to Chinese"}
-          title={zh ? "切换到英文" : "Switch to Chinese"}
-        >
-          {zh ? "EN" : "中"}
-        </button>
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          <button
+            type="button"
+            className={headerControlClassName}
+            disabled={disabled}
+            onClick={() => onLanguageChange(zh ? "en" : "zh")}
+            aria-label={zh ? "Switch to English" : "切换到中文"}
+            title={zh ? "Switch to English" : "切换到中文"}
+          >
+            {zh ? "EN" : "中"}
+          </button>
+          <button
+            type="button"
+            className={headerControlClassName}
+            onClick={onClose}
+            aria-label={zh ? "关闭菜单" : "Close menu"}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
       </div>
       <Button
         variant="ghost"
         className="mx-1 h-10 justify-start gap-2 rounded-lg text-[#45445a] hover:bg-white/55 hover:text-[#343247]"
-        onClick={onNewChat}
+        onClick={() => {
+          onNewChat()
+          onMobileClose()
+        }}
       >
         <Plus className="h-4 w-4" />
         {zh ? "新对话" : "New chat"}
       </Button>
 
-      <div className="mt-6 space-y-5 px-1">
+      <div className="mt-5 space-y-5 px-1">
         <label className="block space-y-2">
           <span className="text-xs font-medium text-zinc-500">{zh ? "学生档案" : "Student profile"}</span>
           <select
             className={selectClassName}
             value={profileId}
             disabled={disabled}
-            onChange={(event) => onProfileChange(event.target.value)}
+            onChange={(event) => {
+              onProfileChange(event.target.value)
+              onMobileClose()
+            }}
           >
             {profiles.map((profile) => (
               <option key={profile.id} value={profile.id}>
@@ -84,14 +115,17 @@ export function Sidebar({
             className={selectClassName}
             value={modeId}
             disabled={disabled}
-            onChange={(event) => onModeChange(event.target.value)}
+            onChange={(event) => {
+              onModeChange(event.target.value)
+              onMobileClose()
+            }}
           >
             <option value="" disabled>
               {zh ? "请选择推荐类型" : "Select a recommendation type"}
             </option>
             {modes.map((mode) => (
               <option key={mode.id} value={mode.id}>
-                {language === "zh" ? mode.title_zh : mode.title_en}
+                {language === "zh" ? mode.title_zh : mode.title_en}{modeHistoryIds.includes(mode.id) ? "  •" : ""}
               </option>
             ))}
           </select>

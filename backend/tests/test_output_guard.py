@@ -5,6 +5,19 @@ from src.safety.output_guard import guarded_output_stream, validate_generated_ou
 
 
 class OutputGuardTests(unittest.TestCase):
+    COLLEGE_FACTS = {
+        "schools": [
+            {
+                "name": "Example University",
+                "admission_rate": 0.423,
+                "cost": 51234,
+                "net_price": 22100,
+                "size": 12345,
+                "fields": ["Computer Science"],
+            }
+        ]
+    }
+
     def test_safe_output_is_allowed(self) -> None:
         result = validate_generated_output(
             "Computer Science is strongly supported by the documented evidence.",
@@ -21,6 +34,15 @@ class OutputGuardTests(unittest.TestCase):
         self.assertTrue(result.allowed)
         self.assertEqual(result.category, OutputCategory.PII_SECRET)
         self.assertNotIn("1234567890abcdef", result.sanitized_text)
+
+    def test_zero_width_obfuscated_secret_is_fully_redacted(self) -> None:
+        result = validate_generated_output(
+            "Internal token: s\u200bk-1234567890abcdef",
+            application_type="uc",
+        )
+        self.assertTrue(result.allowed)
+        self.assertEqual(result.action, OutputAction.REDACT)
+        self.assertEqual(result.sanitized_text, "[REDACTED]")
 
     def test_prompt_leak_is_blocked(self) -> None:
         result = validate_generated_output(
@@ -45,6 +67,50 @@ class OutputGuardTests(unittest.TestCase):
         )
         self.assertFalse(result.allowed)
         self.assertEqual(result.category, OutputCategory.INTERNAL_DATA)
+
+    def test_grounded_college_facts_are_allowed(self) -> None:
+        result = validate_generated_output(
+            "### 1. Example University\n\nAdmission rate: 42.3%\n\nCost: $51,234\n\n12,345 undergraduates",
+            application_type="college_major",
+            fact_reference=self.COLLEGE_FACTS,
+        )
+        self.assertTrue(result.allowed)
+
+    def test_invented_school_heading_is_blocked(self) -> None:
+        result = validate_generated_output(
+            "### 1. Imaginary University\n",
+            application_type="college_major",
+            fact_reference=self.COLLEGE_FACTS,
+        )
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.category, OutputCategory.UNGROUNDED_FACT)
+
+    def test_incorrect_college_percentage_is_blocked(self) -> None:
+        result = validate_generated_output(
+            "### 1. Example University\n\nAdmission rate: 91%\n",
+            application_type="college_major",
+            fact_reference=self.COLLEGE_FACTS,
+        )
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.category, OutputCategory.UNGROUNDED_FACT)
+
+    def test_incorrect_college_cost_is_blocked(self) -> None:
+        result = validate_generated_output(
+            "### 1. Example University\n\nCost: $99,999\n",
+            application_type="college_major",
+            fact_reference=self.COLLEGE_FACTS,
+        )
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.category, OutputCategory.UNGROUNDED_FACT)
+
+    def test_invented_reported_field_is_blocked(self) -> None:
+        result = validate_generated_output(
+            "### 1. Example University\n\n**Matching reported field:** Quantum Wizardry\n",
+            application_type="college_major",
+            fact_reference=self.COLLEGE_FACTS,
+        )
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.category, OutputCategory.UNGROUNDED_FACT)
 
     def test_cip_code_is_blocked_from_college_output(self) -> None:
         result = validate_generated_output(

@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 from backend.app.conversation_service import (
     Conversation,
     TargetCollegeIntent,
+    _conversations,
     _naturalize_reply,
     _resolve_scorecard_target,
     _translate_college_name_to_english,
@@ -303,6 +304,27 @@ class FieldConversationTests(unittest.TestCase):
 
         self.assertNotIn("field", result["answered"])
         self.assertIn("无法可靠识别", result["reply"])
+
+    def test_completed_preference_can_be_reopened_for_editing(self) -> None:
+        conversation = Conversation("editable-session", "test-profile", "en")
+        conversation.scenario = "major_first"
+        conversation.awaiting = "sat"
+        conversation.preferences["field"] = "Computer Science"
+        conversation.answered.update({"scenario", "field"})
+        _conversations[conversation.id] = conversation
+        self.addCleanup(_conversations.pop, conversation.id, None)
+
+        result = chat(
+            conversation.id,
+            "test-profile",
+            "en",
+            "Change field",
+            choice_id="edit_field",
+        )
+
+        self.assertEqual(result["awaiting"], "field")
+        self.assertNotIn("field", result["answered"])
+        self.assertIn("field", result["reply"].lower())
 
 
 if __name__ == "__main__":
