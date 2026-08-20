@@ -9,6 +9,7 @@ class OutputCategory(str, Enum):
     PII_SECRET = "PII_SECRET"
     PROMPT_LEAK = "PROMPT_LEAK"
     INTERNAL_DATA = "INTERNAL_DATA"
+    SENSITIVE_CONTENT = "SENSITIVE_CONTENT"
     POLICY_VIOLATION = "POLICY_VIOLATION"
     UNGROUNDED_REFERENCE = "UNGROUNDED_REFERENCE"
 
@@ -26,4 +27,3 @@ class OutputSafetyResult:
     action: OutputAction
     reason: str
     sanitized_text: str
-

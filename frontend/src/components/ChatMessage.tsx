@@ -26,6 +26,18 @@ export function ChatMessage({ message }: ChatMessageProps) {
     <div className="max-w-2xl">
       <Markdown
         components={{
+          h1: ({ children }) => (
+            <h1 className="mb-4 mt-9 text-2xl font-semibold tracking-tight first:mt-0">
+              {children}
+            </h1>
+          ),
+
+          h2: ({ children }) => (
+            <h2 className="mb-3 mt-8 text-[1.35rem] font-semibold tracking-tight first:mt-0">
+              {children}
+            </h2>
+          ),
+
           h3: ({ children }) => (
             <h3 className="mb-3 mt-8 text-xl font-semibold first:mt-0">
               {children}

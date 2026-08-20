@@ -33,6 +33,10 @@ const defaultCollegePreferences: CollegePreferences = {
 
 type LoadingPhase = "conversation" | "recommendation" | null
 type CollegeScenario = "college_first" | "major_first" | "explore" | null
+type PendingLanguageSwitch = {
+  message: string
+  target: "en" | "zh"
+} | null
 
 function App() {
   const [input, setInput] = useState("")
@@ -52,6 +56,8 @@ function App() {
   const [answeredPreferences, setAnsweredPreferences] = useState<string[]>([])
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([])
   const [awaitingPreference, setAwaitingPreference] = useState<string | null>(null)
+  const [pendingLanguageSwitch, setPendingLanguageSwitch] = useState<PendingLanguageSwitch>(null)
+  const [languageCheckBypass, setLanguageCheckBypass] = useState<string | null>(null)
   const scrollViewportRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -85,6 +91,18 @@ function App() {
     const trimmedInput = input.trim()
     const isCollegeMode = modeId === "college_field"
     if (!trimmedInput || !profileId || !modeId || isStreaming) return
+
+    const detectedLanguage = detectInputLanguage(trimmedInput)
+    if (
+      detectedLanguage
+      && detectedLanguage !== language
+      && languageCheckBypass !== trimmedInput
+    ) {
+      setPendingLanguageSwitch({ message: trimmedInput, target: detectedLanguage })
+      return
+    }
+    setPendingLanguageSwitch(null)
+    setLanguageCheckBypass(null)
 
     if (!isCollegeMode && isCasualGreeting(trimmedInput)) {
       const replyInChinese = language === "zh" || /[\u4e00-\u9fff]/.test(trimmedInput)
@@ -274,11 +292,11 @@ function App() {
           ? "探索大学和宽泛的专业领域；我会一次问一个有用的问题。"
           : "Explore colleges and broad fields of study. I’ll ask one useful question at a time.",
         common_app: zh
-          ? "根据学生档案中的经历，按你需要的数量推荐最适合展开的 Common App 主文书题目。"
-          : "Recommend the requested number of Common App prompts that best fit the student’s documented experiences.",
+          ? "根据学生档案中的经历推荐最适合展开的题目。Common App 主文书提交 1 篇，最多 650 字。"
+          : "Find the best-fitting prompt for the student’s documented experiences. The Common App personal essay is one essay of up to 650 words.",
         uc_piq: zh
-          ? "根据学生档案中的经历，按你需要的数量推荐最适合展现个人特质的 UC PIQ 题目。"
-          : "Recommend the requested number of UC PIQ prompts that best showcase the student’s documented experiences.",
+          ? "根据学生档案中的经历推荐最适合展现个人特质的题目。UC 要求从 8 道 PIQ 中选择 4 道，每篇最多 350 字。"
+          : "Find the PIQs that best showcase the student’s documented experiences. UC requires 4 of the 8 PIQs, with up to 350 words per response.",
       }[modeId]
     : undefined
 
@@ -301,6 +319,16 @@ function App() {
     }))
   }
 
+  function handleInputChange(value: string) {
+    setInput(value)
+    if (pendingLanguageSwitch?.message !== value.trim()) {
+      setPendingLanguageSwitch(null)
+    }
+    if (languageCheckBypass !== value.trim()) {
+      setLanguageCheckBypass(null)
+    }
+  }
+
   function handleNewChat() {
     setMessages([])
     setModeId("")
@@ -310,6 +338,8 @@ function App() {
     setAnsweredPreferences([])
     setQuickReplies([])
     setAwaitingPreference(null)
+    setPendingLanguageSwitch(null)
+    setLanguageCheckBypass(null)
     setCollegePreferences(defaultCollegePreferences)
   }
 
@@ -386,9 +416,22 @@ function App() {
                   {modeDescription}
                 </p>
               )}
+              {pendingLanguageSwitch && (
+                <LanguageSwitchPrompt
+                  target={pendingLanguageSwitch.target}
+                  onSwitch={() => {
+                    handleLanguageChange(pendingLanguageSwitch.target)
+                    setPendingLanguageSwitch(null)
+                  }}
+                  onKeep={() => {
+                    setLanguageCheckBypass(pendingLanguageSwitch.message)
+                    setPendingLanguageSwitch(null)
+                  }}
+                />
+              )}
               <ChatComposer
                 input={input}
-                setInput={setInput}
+                setInput={handleInputChange}
                 onSend={handleSend}
                 disabled={composerDisabled}
                 requireInput
@@ -440,9 +483,22 @@ function App() {
                       ))}
                     </div>
                 )}
+                {pendingLanguageSwitch && (
+                  <LanguageSwitchPrompt
+                    target={pendingLanguageSwitch.target}
+                    onSwitch={() => {
+                      handleLanguageChange(pendingLanguageSwitch.target)
+                      setPendingLanguageSwitch(null)
+                    }}
+                    onKeep={() => {
+                      setLanguageCheckBypass(pendingLanguageSwitch.message)
+                      setPendingLanguageSwitch(null)
+                    }}
+                  />
+                )}
                 <ChatComposer
                   input={input}
-                  setInput={setInput}
+                  setInput={handleInputChange}
                   onSend={handleSend}
                   disabled={composerDisabled}
                   placeholder={zh ? "请输入关于大学、专业或申请的问题……" : "Ask about colleges, majors, or your application..."}
@@ -473,6 +529,47 @@ function LoadingStatus({ label }: { label: string }) {
   )
 }
 
+function LanguageSwitchPrompt({
+  target,
+  onSwitch,
+  onKeep,
+}: {
+  target: "en" | "zh"
+  onSwitch: () => void
+  onKeep: () => void
+}) {
+  const switchingToChinese = target === "zh"
+  return (
+    <div className="language-switch-card mb-3 rounded-2xl px-4 py-3 text-sm text-zinc-700" role="status">
+      <p>
+        {switchingToChinese
+          ? "检测到你输入了中文。是否切换到中文模式？"
+          : "检测到你输入了英文。是否切换到英文模式？"}
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button type="button" className="language-switch-button is-primary" onClick={onSwitch}>
+          {switchingToChinese ? "切换到中文" : "切换到英文"}
+        </button>
+        <button type="button" className="language-switch-button is-secondary" onClick={onKeep}>
+          {switchingToChinese ? "继续使用英文" : "继续使用中文"}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function detectInputLanguage(message: string): "en" | "zh" | null {
+  const normalized = message.trim().toLowerCase().replace(/[^a-z]+/g, "")
+  if (["hi", "hey", "hello", "yo", "sup"].includes(normalized)) return "en"
+
+  const chineseCharacters = message.match(/[\u3400-\u9fff]/g)?.length ?? 0
+  if (chineseCharacters >= 2) return "zh"
+
+  const latinLetters = message.match(/[a-z]/gi)?.length ?? 0
+  if (chineseCharacters === 0 && latinLetters >= 4) return "en"
+  return null
+}
+
 function getCasualFeedbackReply(message: string, language: "en" | "zh") {
   const normalized = message.trim().toLowerCase()
   const asksForWork = /[?？]|推荐|分析|帮我|请问|怎么|如何|recommend|analy[sz]e|help|which|what|how/.test(normalized)
@@ -498,6 +595,7 @@ function isClearlyUnclearMessage(message: string, awaitingPreference: string | n
   if (awaitingPreference !== null) return false
   if (/[?？]/.test(compact) || /\d/.test(compact)) return false
   if (["hi", "go", "ok", "yes", "no", "嗨", "你好", "是", "否"].includes(compact)) return false
+  if (["欸", "诶", "呃", "嗯", "额", "啊", "哦", "噢"].includes(compact)) return true
   return /^[a-z]$/.test(compact) || /^[a-z]{2}$/.test(compact)
 }
 

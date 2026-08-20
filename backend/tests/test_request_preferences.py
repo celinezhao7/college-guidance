@@ -17,6 +17,12 @@ class RequestPreferenceTests(unittest.TestCase):
             1,
         )
 
+    def test_chinese_follow_up_count_with_classifier(self) -> None:
+        self.assertEqual(
+            requested_recommendation_count("我只想要两个", "uc"),
+            2,
+        )
+
     def test_english_two_recommendations(self) -> None:
         self.assertEqual(
             requested_recommendation_count("Just recommend two prompts", "common_app"),

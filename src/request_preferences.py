@@ -31,7 +31,7 @@ def requested_recommendation_count(query: str, application_type: str) -> int:
     lowered = query.lower()
 
     digit_match = re.search(
-        r"(?:only|just|need|want|recommend|give me|show me|只要|需要|推荐|给我|我要)"
+        r"(?:only|just|need|want|recommend|give me|show me|只要|只想要|想要|需要|推荐|给我|我要)"
         r".{0,24}?(?<!\d)([1-8])(?!\d)"
         r"|(?<!\d)([1-8])(?!\d)\s*(?:piqs?|prompts?|recommendations?|个|道|篇|条)",
         lowered,
@@ -53,7 +53,7 @@ def requested_recommendation_count(query: str, application_type: str) -> int:
         return min(_ENGLISH_NUMBERS[word.lower()], maximum)
 
     chinese_match = re.search(
-        r"(?:只要|需要|推荐|给我|我要).{0,16}?([一二两三四五六七八])\s*(?:个|道|篇|条)?"
+        r"(?:只要|只想要|想要|需要|推荐|给我|我要).{0,16}?([一二两三四五六七八])\s*(?:个|道|篇|条)?"
         r"|([一二两三四五六七八])\s*(?:个|道|篇|条)?\s*(?:就够|即可|就行)",
         query,
     )

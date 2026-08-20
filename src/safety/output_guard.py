@@ -2,7 +2,7 @@
 
 import re
 import logging
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 
 from .grounding_guard import (
     extract_experience_labels,
@@ -47,6 +47,12 @@ _EVIDENCE_LINE_PREFIX = re.compile(
 )
 _STREAM_HOLDBACK_CHARS = 80
 _MAX_EXPERIENCE_LINE_CHARS = 500
+_MAX_BUFFER_CHARS = 250_000
+_RETRYABLE_CATEGORIES = {
+    OutputCategory.INTERNAL_DATA,
+    OutputCategory.POLICY_VIOLATION,
+    OutputCategory.UNGROUNDED_REFERENCE,
+}
 
 
 def _redact(text: str) -> str:
@@ -64,10 +70,18 @@ def validate_generated_output(
 ) -> OutputSafetyResult:
     """Validate one not-yet-visible paragraph of generated output."""
     input_safety = validate_input(text, "chat")
-    if not input_safety.allowed and input_safety.category is not SafetyCategory.PROMPT_INJECTION:
+    if input_safety.category is SafetyCategory.PROMPT_INJECTION:
         return OutputSafetyResult(
             False,
-            OutputCategory.POLICY_VIOLATION,
+            OutputCategory.PROMPT_LEAK,
+            OutputAction.BLOCK,
+            "Generated text contains instruction-override or prompt-exfiltration content.",
+            "",
+        )
+    if not input_safety.allowed:
+        return OutputSafetyResult(
+            False,
+            OutputCategory.SENSITIVE_CONTENT,
             OutputAction.BLOCK,
             "Generated text contains harmful instructional content.",
             "",
@@ -130,15 +144,24 @@ def guarded_output_stream(
     application_type: str,
     language: str,
     reference_text: str = "",
+    retry_factory: Callable[[], Iterable[str]] | None = None,
 ) -> Iterator[str]:
-    """Continuously release safe text while retaining a small inspection window."""
+    """Stream validated text while retaining a small cross-chunk safety window."""
     buffer = ""
+    released_any = False
     for chunk in chunks:
+        if not isinstance(chunk, str):
+            continue
         buffer += chunk
+        if len(buffer) > _MAX_BUFFER_CHARS:
+            logger.warning("Output guard rejected oversized generated content: mode=%s", application_type)
+            yield _fallback(language, OutputCategory.POLICY_VIOLATION)
+            return
+
         if _has_unfinished_experience_label(buffer, reference_text):
             if len(buffer) <= _MAX_EXPERIENCE_LINE_CHARS:
                 continue
-            yield _fallback(language)
+            yield _fallback(language, OutputCategory.UNGROUNDED_REFERENCE)
             return
 
         full_result = validate_generated_output(
@@ -148,7 +171,19 @@ def guarded_output_stream(
         )
         if not full_result.allowed:
             _log_block(full_result, application_type)
-            yield _fallback(language)
+            if (
+                not released_any
+                and retry_factory is not None
+                and full_result.category in _RETRYABLE_CATEGORIES
+            ):
+                yield from guarded_output_stream(
+                    retry_factory(),
+                    application_type=application_type,
+                    language=language,
+                    reference_text=reference_text,
+                )
+                return
+            yield _fallback(language, full_result.category)
             return
         if len(buffer) <= _STREAM_HOLDBACK_CHARS:
             continue
@@ -160,8 +195,6 @@ def guarded_output_stream(
             application_type=application_type,
             reference_text=reference_text,
         )
-        # A secret may begin in the emitted prefix and end in the retained tail.
-        # In that rare case, hold everything until it can be redacted as a unit.
         if (
             full_result.action is OutputAction.REDACT
             and segment_result.action is not OutputAction.REDACT
@@ -169,9 +202,11 @@ def guarded_output_stream(
             continue
         if not segment_result.allowed:
             _log_block(segment_result, application_type)
-            yield _fallback(language)
+            yield _fallback(language, segment_result.category)
             return
-        yield segment_result.sanitized_text
+        if segment_result.sanitized_text:
+            released_any = True
+            yield segment_result.sanitized_text
         buffer = remaining
 
     if buffer:
@@ -182,13 +217,26 @@ def guarded_output_stream(
         )
         if not result.allowed:
             _log_block(result, application_type)
-            yield _fallback(language)
+            if (
+                not released_any
+                and retry_factory is not None
+                and result.category in _RETRYABLE_CATEGORIES
+            ):
+                yield from guarded_output_stream(
+                    retry_factory(),
+                    application_type=application_type,
+                    language=language,
+                    reference_text=reference_text,
+                )
+                return
+            yield _fallback(language, result.category)
             return
-        yield result.sanitized_text
+        if result.sanitized_text:
+            yield result.sanitized_text
 
 
 def _has_unfinished_experience_label(buffer: str, reference_text: str) -> bool:
-    """Hold an evidence label only until its exact source title can be checked."""
+    """Hold a partial evidence label until its experience number can be checked."""
     labels = extract_experience_labels(reference_text)
     if not labels:
         return False
@@ -196,10 +244,8 @@ def _has_unfinished_experience_label(buffer: str, reference_text: str) -> bool:
     if prefixes:
         after_prefix = buffer[prefixes[-1].end():]
         partial_label = " ".join(after_prefix.lower().split())
-        if (
-            not partial_label
-            or "experience".startswith(partial_label)
-            or re.fullmatch(r"experience\s*\d*\s*:?", partial_label)
+        if not partial_label or "experience".startswith(partial_label) or re.fullmatch(
+            r"experience\s*\d*\s*:?", partial_label
         ):
             return True
     current_line = buffer[buffer.rfind("\n") + 1:]
@@ -219,8 +265,6 @@ def _has_unfinished_experience_label(buffer: str, reference_text: str) -> bool:
     ]
     if any(label in current_line[marker.start():] for label in matching_labels):
         return False
-    # Once the line ends, the grounding validator can safely decide whether the
-    # referenced number exists without leaking a partial label.
     return "\n" not in current_line[marker.start():]
 
 
@@ -233,9 +277,16 @@ def _log_block(result: OutputSafetyResult, application_type: str) -> None:
     )
 
 
-def _fallback(language: str) -> str:
+def _fallback(language: str, category: OutputCategory) -> str:
+    accuracy_failure = category is OutputCategory.UNGROUNDED_REFERENCE
+    if language == "zh":
+        return (
+            "抱歉，我无法根据现有学生资料验证这份答案，因此没有显示可能不准确的内容。请补充资料或换一种更明确的问法。"
+            if accuracy_failure
+            else "抱歉，生成的答案没有通过安全检查，因此未显示。请调整问题后重试。"
+        )
     return (
-        "抱歉，生成内容的一部分没有通过安全性或准确性检查，因此未显示。请重试或换一种更明确的问法。"
-        if language == "zh"
-        else "Sorry, part of the generated response did not pass safety or accuracy checks, so it was not shown. Please try again or make the request more specific."
+        "Sorry, I could not verify this answer against the available student evidence, so potentially inaccurate content was not shown. Add supporting information or make the request more specific."
+        if accuracy_failure
+        else "Sorry, the generated answer did not pass the safety check, so it was not shown. Please revise the request and try again."
     )

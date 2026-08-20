@@ -172,4 +172,3 @@ def validate_input(text: str, source_type: str | SafetySource) -> SafetyResult:
 def validate_sensitive_content(text: str) -> SafetyResult:
     """Backward-compatible convenience wrapper for chat input."""
     return validate_input(text, SafetySource.CHAT)
-

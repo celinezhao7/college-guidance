@@ -1,4 +1,5 @@
 import os
+import re
 import time
 from functools import lru_cache
 from pathlib import Path
@@ -27,6 +28,7 @@ if __package__:
         validate_input,
     )
     from .student_profiles import choose_student_profile, list_student_profiles
+    from .user_message_context import USER_MESSAGE_POLICY, response_language
 else:
     from college_major import (
         MAJOR_SYSTEM_PROMPT,
@@ -39,6 +41,7 @@ else:
     from request_preferences import explicitly_requested_mode, requested_recommendation_count
     from safety import SafetyAction, SafetyCategory, guarded_output_stream, validate_input
     from student_profiles import choose_student_profile, list_student_profiles
+    from user_message_context import USER_MESSAGE_POLICY, response_language
 
 
 load_dotenv()
@@ -172,7 +175,6 @@ challenges, community contribution, family responsibility,
 personal growth, actions, impact, outcomes, identity,
 values, curiosity, reflection, and meaningful experiences.
 """
-
 
 # ============================================================
 # UC System Prompt
@@ -333,29 +335,31 @@ could improve the eventual essay.
 
 # OUTPUT
 
-For each recommendation:
+Return valid Markdown. Do not wrap the response in a code fence.
 
-PIQ #[number]: [title]
+For each recommendation, use this exact visual structure:
 
-Why It Fits:
+### [rank]. PIQ #[number]: [title]
+
+**Why It Fits**
 Explain why the documented experience meaningfully answers this PIQ.
 
-Primary Supporting Experience:
+**Primary Supporting Experience:**
 Use the exact experience number and title from the retrieved student evidence.
 
-Secondary Supporting Evidence (optional):
+**Secondary Supporting Evidence:** (optional)
 Include only if another documented experience clearly strengthens
 the same PIQ. Use the exact experience number and title.
 
-Supporting Evidence:
-- Student Action:
-- Impact / Outcome:
-- Reflection / Personal Insight:
+**Supporting Evidence**
 
-Evidence Strength:
-High / Medium / Low
+- **Student Action:** [evidence]
+- **Impact / Outcome:** [evidence]
+- **Reflection / Personal Insight:** [evidence]
 
-Evidence Gaps:
+**Evidence Strength:** High / Medium / Low
+
+**Evidence Gaps:**
 List only missing information that could materially affect confidence
 in recommending this PIQ.
 
@@ -363,9 +367,11 @@ If the existing evidence is sufficient, say:
 
 "No major evidence gap."
 
-After all recommendations, when more than one was requested:
+Separate recommendations with a Markdown horizontal rule (`---`).
 
-Why These Four:
+After all recommendations, when more than one was requested, add:
+
+## Why These Recommendations
 
 Briefly explain:
 
@@ -580,35 +586,35 @@ If the existing evidence is sufficient, say:
 
 # OUTPUT
 
-For each recommendation:
+Return valid Markdown. Do not wrap the response in a code fence.
 
-Rank #[number]
+For each recommendation, use this exact visual structure:
 
-Common App Prompt #[number]: [title]
+### [rank]. Common App Prompt #[number]: [title]
 
-Why It Fits:
+**Why It Fits**
 Explain why the documented experience meaningfully fits this prompt.
 
-Primary Supporting Experience:
+**Primary Supporting Experience:**
 Use the exact experience number and title from the retrieved
 student evidence.
 
-Secondary Supporting Evidence (optional):
+**Secondary Supporting Evidence:** (optional)
 Include only when another documented experience clearly strengthens
 the same story or theme.
 
 If secondary evidence is used, keep its facts separate from the
 primary experience. Do not merge details from two experiences.
 
-Story Potential:
+**Story Potential**
 Explain what makes this experience capable of supporting a meaningful
 personal essay without writing the essay itself.
 
-Personal Insight Potential:
+**Personal Insight Potential**
 Explain what this story could reveal about the student based only
 on documented evidence.
 
-Evidence Strength:
+**Evidence Strength:**
 
 Use exactly ONE of the following labels:
 
@@ -622,7 +628,7 @@ Do not use intermediate labels such as:
 "Medium-Low"
 or numerical scores.
 
-Evidence Gaps:
+**Evidence Gaps:**
 List only missing information that could materially affect confidence
 in recommending this prompt.
 
@@ -630,16 +636,18 @@ If the existing evidence is sufficient, say:
 
 "No major evidence gap."
 
+Separate recommendations with a Markdown horizontal rule (`---`).
+
 After all recommendations, when more than one was requested:
 
-# Best Overall Choice
+## Best Overall Choice
 
 Common App Prompt #[number]: [title]
 
 Explain briefly why this is the strongest prompt-story match for
 this student compared with the alternatives.
 
-# Why Not the Other Prompts?
+## Why Not the Other Prompts?
 
 Briefly identify the most plausible non-selected prompts and explain
 why their documented support is weaker or less natural.
@@ -750,6 +758,10 @@ def stream_recommendation(
             )
         return
 
+    # Follow the language the user actually used for this request. This matters
+    # when the interface language and a pasted/typed message do not match.
+    language = response_language(language, query)
+
     requested_mode = explicitly_requested_mode(query)
     if (
         application_type in {"uc", "common_app"}
@@ -779,40 +791,52 @@ def stream_recommendation(
     if application_type == "college_major":
         student_context = get_all_student_context(profile_name)
         if college_scenario == "college_first" and college_preferences:
-            yield from guarded_output_stream(
-                stream_majors_at_target_colleges(
+            def generate_target_college_majors():
+                return stream_majors_at_target_colleges(
                     llm,
                     student_context,
                     college_preferences.get("targets", ""),
                     language,
-                ),
+                )
+
+            yield from guarded_output_stream(
+                generate_target_college_majors(),
                 application_type=application_type,
                 language=language,
                 reference_text=student_context,
+                retry_factory=generate_target_college_majors,
             )
             return
         if college_scenario == "major_first" and college_preferences:
-            yield from guarded_output_stream(
-                stream_college_recommendations(
+            def generate_colleges():
+                return stream_college_recommendations(
                     llm,
                     student_context,
                     college_preferences,
                     language,
-                ),
+                )
+
+            yield from guarded_output_stream(
+                generate_colleges(),
                 application_type=application_type,
                 language=language,
                 reference_text=student_context,
+                retry_factory=generate_colleges,
             )
             return
-        yield from guarded_output_stream(
-            stream_official_cip_field_recommendations(
+        def generate_fields():
+            return stream_official_cip_field_recommendations(
                 llm,
                 student_context,
                 language,
-            ),
+            )
+
+        yield from guarded_output_stream(
+            generate_fields(),
             application_type=application_type,
             language=language,
             reference_text=student_context,
+            retry_factory=generate_fields,
         )
         return
 
@@ -846,17 +870,7 @@ Why Not the Other Prompts section. If more than one was requested, rank exactly
 {recommendation_count} recommendations from strongest to weakest.
 """
 
-    system_prompt += """
-
-# USER MESSAGE RELEVANCE
-
-First inspect the supplied USER MESSAGE. If it is casual conversation, unclear,
-or unrelated to the selected essay-recommendation tool, do not perform the
-recommendation task and do not discuss the student profile. Reply briefly and
-politely that you did not understand the request and explain that this tool is
-for recommending application essay prompts. If the message is relevant, proceed
-with the recommendation task normally.
-"""
+    system_prompt += USER_MESSAGE_POLICY
 
     guidance_docs = guidance_retriever.invoke(guidance_query)
 
@@ -901,21 +915,24 @@ Recommend exactly {recommendation_count} best-supported Common App essay prompt(
 for this student and identify the Best Overall Choice.
 """
 
-    raw_chunks = (
-        chunk.content
-        for chunk in llm.stream(
-            [
-                ("system", system_prompt),
-                ("user", user_prompt),
-            ]
+    def generate_essay_recommendation():
+        return (
+            chunk.content
+            for chunk in llm.stream(
+                [
+                    ("system", system_prompt),
+                    ("user", user_prompt),
+                ]
+            )
+            if chunk.content
         )
-        if chunk.content
-    )
+
     yield from guarded_output_stream(
-        raw_chunks,
+        generate_essay_recommendation(),
         application_type=application_type,
         language=language,
         reference_text=student_context,
+        retry_factory=generate_essay_recommendation,
     )
 # ============================================================
 # Main
