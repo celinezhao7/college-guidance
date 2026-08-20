@@ -44,6 +44,12 @@ export function isValidCollegeCount(message: string) {
   return value >= 1 && value <= 20
 }
 
+export function isAmbiguousBarePromptNumber(message: string, modeId: string) {
+  if (!/^[1-8]$/.test(message.trim())) return false
+  if (modeId === "common_app") return Number(message.trim()) <= 7
+  return modeId === "uc_piq"
+}
+
 export function containsNonPersistableContent(value: string) {
   return /\b(?:\d[ -]*?){13,19}\b|\b(?:sk|pk)-[A-Za-z0-9_-]{16,}\b|\b\d{3}-\d{2}-\d{4}\b|(?:api[_ -]?key|password|passwd|access[_ -]?token|secret)\s*[:=]|(?:银行卡|身份证|密码|密钥|抑郁|霸凌|自残|自杀|性侵)|\b(?:depression|bullying|self[- ]harm|suicid(?:e|al)?|sexual assault)\b/i.test(value)
 }

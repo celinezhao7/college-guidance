@@ -4,6 +4,7 @@ import { ApiError } from "@/lib/api"
 import {
   annotateRecognizedPinyin,
   detectInputLanguage,
+  isAmbiguousBarePromptNumber,
   isValidCollegeCount,
   persistableConversation,
   recommendationErrorMessage,
@@ -28,6 +29,18 @@ describe("college count validation", () => {
     expect(isValidCollegeCount("21")).toBe(false)
     expect(isValidCollegeCount("5.5")).toBe(false)
     expect(isValidCollegeCount("five")).toBe(false)
+  })
+})
+
+describe("prompt-number clarification", () => {
+  it("treats a bare valid prompt number as ambiguous", () => {
+    expect(isAmbiguousBarePromptNumber("4", "common_app")).toBe(true)
+    expect(isAmbiguousBarePromptNumber("8", "uc_piq")).toBe(true)
+  })
+
+  it("does not intercept an explicit request or an invalid prompt number", () => {
+    expect(isAmbiguousBarePromptNumber("recommend 4", "common_app")).toBe(false)
+    expect(isAmbiguousBarePromptNumber("8", "common_app")).toBe(false)
   })
 })
 

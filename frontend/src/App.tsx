@@ -17,6 +17,7 @@ import {
 import {
   annotateRecognizedPinyin,
   detectInputLanguage,
+  isAmbiguousBarePromptNumber,
   isValidCollegeCount,
   persistableConversation,
   recommendationErrorMessage,
@@ -223,6 +224,23 @@ function App() {
       return
     }
     setInputError("")
+
+    if (!isCollegeMode && isAmbiguousBarePromptNumber(trimmedInput, modeId)) {
+      brieflyLockSubmission()
+      const promptName = modeId === "common_app" ? "Common App prompt" : "UC PIQ"
+      setMessages((previous) => [
+        ...previous,
+        { role: "user", content: trimmedInput },
+        {
+          role: "assistant",
+          content: language === "zh"
+            ? `我不确定“${trimmedInput}”指的是数量还是题号。你希望我推荐 ${trimmedInput} 个题目，还是分析第 ${trimmedInput} 题？请回复“推荐 ${trimmedInput} 个”或“分析第 ${trimmedInput} 题”。`
+            : `I’m not sure whether “${trimmedInput}” is a quantity or a prompt number. Would you like ${trimmedInput} ${promptName}s recommended, or an analysis of ${promptName} #${trimmedInput}? Reply “recommend ${trimmedInput}” or “analyze #${trimmedInput}.”`,
+        },
+      ])
+      setInput("")
+      return
+    }
 
     if (!isCollegeMode && isCasualGreeting(trimmedInput)) {
       brieflyLockSubmission()
