@@ -24,6 +24,7 @@ htmlcov/
 build/
 dist/
 *.egg-info/
+*.log
 
 # Generated local vector database
 chroma/
