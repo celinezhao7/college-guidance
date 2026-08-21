@@ -1,6 +1,7 @@
 """Deterministic unified view of original and user-confirmed profile evidence."""
 
 import re
+from functools import lru_cache
 from pathlib import Path
 
 from docx import Document
@@ -22,8 +23,15 @@ _WRAPPER_HEADINGS = {
 }
 
 
-def _docx_text(path: Path) -> str:
+@lru_cache(maxsize=64)
+def _cached_docx_text(path_value: str, modified_ns: int) -> str:
+    # modified_ns invalidates the cache when a profile file is replaced.
+    path = Path(path_value)
     return "\n".join(p.text.strip() for p in Document(path).paragraphs if p.text.strip())
+
+
+def _docx_text(path: Path) -> str:
+    return _cached_docx_text(str(path.resolve()), path.stat().st_mtime_ns)
 
 
 def _clean_lines(value: str) -> list[str]:

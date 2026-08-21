@@ -141,6 +141,8 @@ Reflection:
         self.assertIsNotNone(prompt)
         value = prompt.group(1)
         self.assertIn("Ask exactly one focused question at a time", value)
+        self.assertIn("candidates you are actually preparing to select", value)
+        self.assertIn("unused Experience has an undocumented field", value)
         self.assertIn("Information Needed — Question [number]", value)
         self.assertIn("Never ask a vague", value)
 

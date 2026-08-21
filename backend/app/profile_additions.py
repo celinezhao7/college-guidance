@@ -3,17 +3,31 @@
 import json
 import os
 import re
-import tempfile
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 from pathlib import Path
+from threading import RLock
 from uuid import uuid4
 
 from .schemas import ProfileAddition, ProfileAdditionRecord
+from .profile_addition_repository import JsonProfileAdditionRepository, ProfileAdditionRepository
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ADDITIONS_DIR = PROJECT_ROOT / "data" / "profile_additions"
 _EXPERIENCE = re.compile(r"Experience\s+(\d+)\s*:\s*([^,\n*?]+)", re.IGNORECASE)
+_repository_override: ProfileAdditionRepository | None = None
+_records_lock = RLock()
+
+
+def configure_profile_addition_repository(repository: ProfileAdditionRepository | None) -> None:
+    """Inject a database-backed repository during deployment or testing."""
+    global _repository_override
+    _repository_override = repository
+
+
+def _repository() -> ProfileAdditionRepository:
+    return _repository_override or JsonProfileAdditionRepository(ADDITIONS_DIR)
 
 
 def preview_addition(question: str, answer: str) -> ProfileAddition:
@@ -60,54 +74,94 @@ Do not infer, embellish, or convert plans into completed actions."""
         return fallback
 
 
-def _path(profile_id: str) -> Path:
-    return ADDITIONS_DIR / f"{profile_id}.json"
-
-
 def load_additions(profile_id: str) -> list[dict]:
-    path = _path(profile_id)
-    if not path.is_file():
-        return []
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, list) else []
-    except (OSError, json.JSONDecodeError):
-        return []
+    return _repository().load(profile_id)
 
 
 def _write_records(profile_id: str, records: list[dict]) -> None:
-    ADDITIONS_DIR.mkdir(parents=True, exist_ok=True)
-    target = _path(profile_id)
-    fd, temporary = tempfile.mkstemp(dir=ADDITIONS_DIR, suffix=".json.tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(records, handle, ensure_ascii=False, indent=2)
-        os.replace(temporary, target)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
+    _repository().write(profile_id, records)
+
+
+def _normalized(value: object) -> str:
+    return " ".join(re.sub(r"[^\w]+", " ", str(value or "").casefold()).split())
+
+
+def _same_target(left: dict, right: dict) -> bool:
+    left_number, right_number = left.get("experience_number"), right.get("experience_number")
+    if left_number is not None and right_number is not None:
+        return left_number == right_number
+    left_title, right_title = _normalized(left.get("experience_title")), _normalized(right.get("experience_title"))
+    return bool(left_title and right_title and SequenceMatcher(None, left_title, right_title).ratio() >= 0.9)
+
+
+def _near_duplicate(left: dict, right: dict) -> bool:
+    if not _same_target(left, right):
+        return False
+    compared = []
+    for field in ("action", "outcome", "reflection"):
+        left_value, right_value = _normalized(left.get(field)), _normalized(right.get(field))
+        if left_value or right_value:
+            compared.append(SequenceMatcher(None, left_value, right_value).ratio())
+    return bool(compared) and min(compared) >= 0.94
+
+
+_NEGATIONS = {"not", "never", "no", "didnt", "didn", "没有", "没", "从未", "不是"}
+
+
+def _conflicting_text(left: object, right: object) -> bool:
+    left_text, right_text = _normalized(left), _normalized(right)
+    if not left_text or not right_text:
+        return False
+    left_tokens, right_tokens = set(left_text.split()), set(right_text.split())
+    left_numbers = set(re.findall(r"\d+(?:\.\d+)?", left_text))
+    right_numbers = set(re.findall(r"\d+(?:\.\d+)?", right_text))
+    without_numbers_left = re.sub(r"\d+(?:\.\d+)?", "", left_text)
+    without_numbers_right = re.sub(r"\d+(?:\.\d+)?", "", right_text)
+    similar_numeric_claim = (
+        left_numbers and right_numbers and left_numbers != right_numbers
+        and SequenceMatcher(None, without_numbers_left, without_numbers_right).ratio() >= 0.72
+    )
+    left_negative = bool(left_tokens & _NEGATIONS)
+    right_negative = bool(right_tokens & _NEGATIONS)
+    stripped_left = " ".join(token for token in left_text.split() if token not in _NEGATIONS)
+    stripped_right = " ".join(token for token in right_text.split() if token not in _NEGATIONS)
+    opposite_claim = (
+        left_negative != right_negative
+        and SequenceMatcher(None, stripped_left, stripped_right).ratio() >= 0.75
+    )
+    return bool(similar_numeric_claim or opposite_claim)
+
+
+def addition_conflicts(profile_id: str, addition: ProfileAddition) -> list[str]:
+    """Return fields with likely contradictions; this is a confirmation guard, not truth inference."""
+    incoming = addition.model_dump()
+    conflicts = set()
+    for existing in load_additions(profile_id):
+        if not _same_target(existing, incoming) or _near_duplicate(existing, incoming):
+            continue
+        for field in ("action", "outcome", "reflection"):
+            if _conflicting_text(existing.get(field), incoming.get(field)):
+                conflicts.add(field)
+    return sorted(conflicts)
 
 
 def save_addition(profile_id: str, addition: ProfileAddition) -> ProfileAdditionRecord:
     """Append a confirmed addition with an atomic file replacement."""
-    ADDITIONS_DIR.mkdir(parents=True, exist_ok=True)
-    records = load_additions(profile_id)
-    record = addition.model_dump()
-    duplicate = any(
-        all(existing.get(key) == value for key, value in record.items())
-        for existing in records
-    )
-    if not duplicate:
-        record["id"] = uuid4().hex
-        record["confirmed_at"] = datetime.now(timezone.utc).isoformat()
-        records.append(record)
-    else:
-        record = next(
-            existing
-            for existing in records
-            if all(existing.get(key) == value for key, value in addition.model_dump().items())
-        )
-    _write_records(profile_id, records)
+    with _records_lock:
+        records = load_additions(profile_id)
+        record = addition.model_dump()
+        duplicate = any(_near_duplicate(existing, record) for existing in records)
+        if not duplicate:
+            record["id"] = uuid4().hex
+            record["confirmed_at"] = datetime.now(timezone.utc).isoformat()
+            records.append(record)
+        else:
+            record = next(
+                existing
+                for existing in records
+                if _near_duplicate(existing, addition.model_dump())
+            )
+        _write_records(profile_id, records)
     return ProfileAdditionRecord.model_validate(record)
 
 
@@ -124,28 +178,30 @@ def update_addition(
     addition_id: str,
     addition: ProfileAddition,
 ) -> ProfileAdditionRecord | None:
-    records = load_additions(profile_id)
-    for index, existing in enumerate(records):
-        if existing.get("id") != addition_id:
-            continue
-        updated = addition.model_dump()
-        updated.update(
-            id=addition_id,
-            confirmed_at=datetime.now(timezone.utc).isoformat(),
-        )
-        records[index] = updated
-        _write_records(profile_id, records)
-        return ProfileAdditionRecord.model_validate(updated)
+    with _records_lock:
+        records = load_additions(profile_id)
+        for index, existing in enumerate(records):
+            if existing.get("id") != addition_id:
+                continue
+            updated = addition.model_dump()
+            updated.update(
+                id=addition_id,
+                confirmed_at=datetime.now(timezone.utc).isoformat(),
+            )
+            records[index] = updated
+            _write_records(profile_id, records)
+            return ProfileAdditionRecord.model_validate(updated)
     return None
 
 
 def delete_addition(profile_id: str, addition_id: str) -> bool:
-    records = load_additions(profile_id)
-    remaining = [item for item in records if item.get("id") != addition_id]
-    if len(remaining) == len(records):
-        return False
-    _write_records(profile_id, remaining)
-    return True
+    with _records_lock:
+        records = load_additions(profile_id)
+        remaining = [item for item in records if item.get("id") != addition_id]
+        if len(remaining) == len(records):
+            return False
+        _write_records(profile_id, remaining)
+        return True
 
 
 def format_additions(profile_id: str) -> str:

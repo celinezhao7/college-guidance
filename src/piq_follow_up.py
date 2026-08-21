@@ -53,7 +53,7 @@ _EVIDENCE_WARNING = re.compile(
 
 _EXPERIENCE_START = re.compile(r"(?m)^Experience\s+\d+\s*:\s*[^\r\n]+")
 _ACTION_EVIDENCE = re.compile(
-    r"(?im)^(?:Actions?|Activities|Responsibilities|Role|Challenge)\s*:"
+    r"(?im)^(?:Actions?|Activities|Responsibilities|Role)\s*:"
 )
 _OUTCOME_EVIDENCE = re.compile(
     r"(?im)^(?:Outcome|Impact|Skills Developed|Leadership Evidence)\s*:"
@@ -79,6 +79,48 @@ class PiqEvidenceSummary:
         return self.well_supported_count < self.requested_count
 
 
+@dataclass(frozen=True)
+class PiqEvidenceGap:
+    experience_label: str
+    field: str
+    priority: int
+
+
+def _field_content(block: str, marker: re.Pattern[str]) -> str:
+    match = marker.search(block)
+    if not match:
+        return ""
+    tail = block[match.end():]
+    next_heading = re.search(r"(?m)^[A-Za-z][A-Za-z /-]+\s*:", tail)
+    return tail[:next_heading.start() if next_heading else None].strip()
+
+
+def _usable_field(block: str, marker: re.Pattern[str]) -> bool:
+    content = _field_content(block, marker)
+    return bool(content) and not bool(_MATERIAL_LIMITATION.search(content))
+
+
+def rank_piq_evidence_gaps(student_context: str) -> list[PiqEvidenceGap]:
+    """Rank missing facts by likelihood of changing recommendation viability."""
+    starts = list(_EXPERIENCE_START.finditer(student_context))
+    gaps: list[PiqEvidenceGap] = []
+    field_rules = (
+        ("action", _ACTION_EVIDENCE, 30),
+        ("reflection", _REFLECTION_EVIDENCE, 20),
+        ("outcome", _OUTCOME_EVIDENCE, 10),
+    )
+    for index, match in enumerate(starts):
+        block = student_context[match.start(): starts[index + 1].start() if index + 1 < len(starts) else None]
+        present_count = sum(_usable_field(block, marker) for _, marker, _ in field_rules)
+        # An experience missing only one key field is closer to becoming a viable
+        # candidate, so its answer has greater expected decision value.
+        completeness_bonus = present_count * 10
+        for field, marker, field_priority in field_rules:
+            if not _usable_field(block, marker):
+                gaps.append(PiqEvidenceGap(match.group(0).strip(), field, completeness_bonus + field_priority))
+    return sorted(gaps, key=lambda gap: (-gap.priority, gap.experience_label, gap.field))
+
+
 def summarize_piq_profile_evidence(
     student_context: str,
     requested_count: int,
@@ -90,10 +132,9 @@ def summarize_piq_profile_evidence(
         for index, match in enumerate(starts)
     ]
     well_supported = sum(
-        bool(_ACTION_EVIDENCE.search(block))
-        and bool(_OUTCOME_EVIDENCE.search(block))
-        and bool(_REFLECTION_EVIDENCE.search(block))
-        and not bool(_MATERIAL_LIMITATION.search(block))
+        _usable_field(block, _ACTION_EVIDENCE)
+        and _usable_field(block, _OUTCOME_EVIDENCE)
+        and _usable_field(block, _REFLECTION_EVIDENCE)
         for block in blocks
     )
     return PiqEvidenceSummary(

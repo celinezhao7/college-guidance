@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import time
 from uuid import uuid4
 
 from src.safety import SafetyAction, SafetyCategory, SafetyResult, validate_input
@@ -109,9 +110,31 @@ class Conversation:
     proposed_field: str | None = None
     scenario: str | None = None
     last_user_message: str = ""
+    updated_at: float = field(default_factory=time.monotonic)
 
 
 _conversations: dict[str, Conversation] = {}
+
+
+def _positive_int_setting(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.getenv(name, str(default))))
+    except ValueError:
+        return default
+
+
+def _prune_conversations(now: float | None = None) -> None:
+    current = time.monotonic() if now is None else now
+    ttl = _positive_int_setting("COLLEGE_CHAT_SESSION_TTL_SECONDS", 3600)
+    maximum = _positive_int_setting("COLLEGE_CHAT_MAX_SESSIONS", 1000)
+    for conversation_id, conversation in list(_conversations.items()):
+        if current - conversation.updated_at > ttl:
+            _conversations.pop(conversation_id, None)
+    overflow = len(_conversations) - maximum
+    if overflow > 0:
+        oldest = sorted(_conversations.values(), key=lambda item: item.updated_at)[:overflow]
+        for conversation in oldest:
+            _conversations.pop(conversation.id, None)
 
 
 def _naturalize_reply(conversation: Conversation, draft: str) -> str:
@@ -776,7 +799,11 @@ def chat(
     message: str,
     choice_id: str | None = None,
 ) -> dict:
+    _prune_conversations()
     conversation = _conversations.get(session_id or "")
+    profile_mismatch = conversation is not None and conversation.profile_id != profile_id
+    if profile_mismatch:
+        conversation = None
     if conversation is None:
         conversation = Conversation(
             id=uuid4().hex,
@@ -784,19 +811,28 @@ def chat(
             language=language if language in QUESTIONS else "en",
         )
         _conversations[conversation.id] = conversation
+        _prune_conversations()
         if session_id:
             conversation.awaiting = "scenario"
-            reply = (
-                "The previous conversation expired, so I started a new one. Please choose whether you have a target college, a target field, or are still exploring both."
-                if conversation.language == "en"
-                else "之前的对话已过期，我已经开始了一个新对话。请选择你已有目标大学、目标专业，还是两者都仍在探索。"
-            )
+            if profile_mismatch:
+                reply = (
+                    "I started a new conversation for the selected student profile. Please choose whether you have a target college, a target field, or are still exploring both."
+                    if conversation.language == "en"
+                    else "我已为当前选择的学生档案开始新对话。请选择你已有目标大学、目标专业，还是两者都仍在探索。"
+                )
+            else:
+                reply = (
+                    "The previous conversation expired, so I started a new one. Please choose whether you have a target college, a target field, or are still exploring both."
+                    if conversation.language == "en"
+                    else "之前的对话已过期，我已经开始了一个新对话。请选择你已有目标大学、目标专业，还是两者都仍在探索。"
+                )
             return _response(
                 conversation,
                 reply,
                 naturalize=False,
                 session_reset=True,
             )
+    conversation.updated_at = time.monotonic()
     conversation.language = language if language in QUESTIONS else "en"
     conversation.preferences["language"] = conversation.language
 

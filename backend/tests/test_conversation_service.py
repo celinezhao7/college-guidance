@@ -262,6 +262,22 @@ class CollegeFirstConversationTests(unittest.TestCase):
         self.assertEqual(result["scenario"], "college_first")
         self.assertEqual([reply["id"] for reply in result["quick_replies"]], ["no_target"])
 
+    def test_session_cannot_cross_student_profile_boundary(self) -> None:
+        original = chat(None, "profile-a", "en", "hi")
+        result = chat(original["session_id"], "profile-b", "en", "continue")
+        self.assertNotEqual(original["session_id"], result["session_id"])
+        self.assertTrue(result["session_reset"])
+        self.assertIsNone(result["scenario"])
+        self.assertEqual("scenario", result["awaiting"])
+
+    def test_expired_session_is_replaced(self) -> None:
+        original = chat(None, "profile-a", "en", "hi")
+        _conversations[original["session_id"]].updated_at -= 10
+        with patch.dict("os.environ", {"COLLEGE_CHAT_SESSION_TTL_SECONDS": "1"}):
+            result = chat(original["session_id"], "profile-a", "en", "continue")
+        self.assertNotEqual(original["session_id"], result["session_id"])
+        self.assertTrue(result["session_reset"])
+
 
 class FieldConversationTests(unittest.TestCase):
     def _start_major_first(self, language: str = "zh") -> str:

@@ -2,25 +2,30 @@ import json
 import os
 import re
 import time
+from datetime import date
 from difflib import SequenceMatcher
 from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from urllib.request import urlopen
 
 from bs4 import BeautifulSoup
 
 if __package__:
     from .i18n import output_language_instruction
+    from .official_school_sources import official_sources_for_school
 else:
     from i18n import output_language_instruction
+    from official_school_sources import official_sources_for_school
 
 
 SCORECARD_URL = "https://api.data.gov/ed/collegescorecard/v1/schools.json"
 CATALOG_PATH = Path(__file__).resolve().parent.parent / "data" / "scorecard_school_catalog.json"
 CIP_2020_BROWSE_URL = "https://nces.ed.gov/ipeds/cipcode/browse.aspx?y=56"
+SCORECARD_DATA_VINTAGE = "latest available value per metric; reporting years may differ"
+CIP_TAXONOMY_VERSION = "NCES CIP 2020 four-digit field"
 
 PROGRAM_FIELDS = {
     "computer": "latest.academics.program_percentage.computer",
@@ -134,6 +139,12 @@ Official-classification rules:
 COLLEGE_SYSTEM_PROMPT = """You are a US undergraduate college recommendation
 assistant. Use only the supplied student profile, preferences, and College
 Scorecard records.
+
+Selection rules:
+- The application has already filtered, verified, selected, and ordered the schools.
+  Preserve the supplied order exactly. Do not replace, remove, add, or reorder schools.
+- Explain inclusion using only the supplied selection reasons and verified facts.
+- Never expose the internal deterministic ranking score.
 
 Evidence rules:
 - Do not convert overall admission rate into the student's admission chance.
@@ -1103,6 +1114,73 @@ def filter_by_max_cost(
     ]
 
 
+def apply_college_filters(colleges: Iterable[dict], preferences: dict) -> tuple[list[dict], list[dict]]:
+    """Apply hard filters in a fixed order and retain an explainable count trace."""
+    current = list(colleges)
+    trace = [{"filter": "scorecard_base", "before": len(current), "after": len(current)}]
+    steps = [
+        ("institution_format", lambda values: filter_by_institution_format(values, preferences["institution_format"])),
+        ("size", lambda values: filter_by_size(values, preferences["size"])),
+        ("selectivity", lambda values: filter_by_selectivity(
+            values, preferences["competition"], preferences.get("admission_rate_min", 0),
+            preferences.get("admission_rate_max", 100),
+        )),
+        ("maximum_cost", lambda values: filter_by_max_cost(values, preferences.get("max_cost"))),
+    ]
+    for name, operation in steps:
+        before = len(current)
+        current = operation(current)
+        trace.append({"filter": name, "before": before, "after": len(current)})
+    return current, trace
+
+
+def format_filter_bottlenecks(trace: list[dict], language: str) -> str:
+    names = {
+        "institution_format": ("学校类型", "institution format"),
+        "size": ("学校规模", "undergraduate size"),
+        "selectivity": ("录取率或竞争程度", "admission-rate/selectivity"),
+        "maximum_cost": ("费用上限", "maximum cost"),
+        "reported_field": ("专业领域验证", "reported field verification"),
+    }
+    reductions = [item for item in trace if item["filter"] in names and item["after"] < item["before"]]
+    if not reductions:
+        return ""
+    lines = ["筛选影响：" if language == "zh" else "Filter impact:"]
+    for item in reductions:
+        label = names[item["filter"]][0 if language == "zh" else 1]
+        lines.append(f"- {label}: {item['before']} → {item['after']}")
+    return "\n".join(lines) + "\n\n"
+
+
+def college_fact_card(college: dict) -> dict:
+    """Build a clean UI payload containing only deterministic Scorecard facts."""
+    matches = college.get("matching_bachelors_fields", [])
+    return {
+        "name": college.get("school.name"),
+        "city": college.get("school.city"),
+        "state": college.get("school.state"),
+        "admission_rate": college.get("latest.admissions.admission_rate.overall"),
+        "attendance_cost": college.get("latest.cost.attendance.academic_year"),
+        "average_net_price": college.get("latest.cost.avg_net_price.overall"),
+        "undergraduate_size": college.get("latest.student.size"),
+        "reported_field": matches[0].get("title") if matches else None,
+        "reported_field_status": matches[0].get("match_status") if matches else "not_verified",
+        "field_taxonomy": CIP_TAXONOMY_VERSION,
+        "official_url": official_school_url(college.get("school.school_url")),
+        "source": "College Scorecard",
+        "data_vintage": SCORECARD_DATA_VINTAGE,
+        "retrieved_on": date.today().isoformat(),
+        "official_sources": official_sources_for_school(str(college.get("school.name", ""))),
+    }
+
+
+def render_college_fact_cards(colleges: Iterable[dict]) -> str:
+    return "".join(
+        f":::college-fact\n{json.dumps(college_fact_card(college), ensure_ascii=False)}\n:::\n\n"
+        for college in colleges
+    )
+
+
 def _size_fit(student_size, preferences: list[str]) -> float:
     if "any" in preferences or student_size is None:
         return 0.0
@@ -1155,7 +1233,11 @@ def matching_programs(query: str, programs: list[dict], limit: int = 5) -> list[
         reverse=True,
     )
     return [
-        {**program, "match_score": round(score, 3)}
+        {
+            **program,
+            "match_score": round(score, 3),
+            "match_status": "direct_title_match" if score >= 0.999 else "related_cip_field",
+        }
         for score, program in scored[:limit]
         if score >= 0.65
     ]
@@ -1188,6 +1270,86 @@ def rank_colleges(
     targets = [college for is_target, _, college in ranked if is_target]
     alternatives = [college for is_target, _, college in ranked if not is_target]
     return (targets + alternatives)[:candidate_limit]
+
+
+def _fact(value) -> dict:
+    return {
+        "value": value,
+        "status": "verified" if value is not None else "unavailable",
+        "source": "College Scorecard",
+        "source_url": "https://collegescorecard.ed.gov/data/",
+        "data_vintage": SCORECARD_DATA_VINTAGE,
+    }
+
+
+def official_school_url(value: str | None) -> str | None:
+    """Normalize a Scorecard-provided school URL and reject unsafe schemes."""
+    if not value or not str(value).strip():
+        return None
+    candidate = str(value).strip()
+    if "://" not in candidate:
+        candidate = f"https://{candidate}"
+    parsed = urlparse(candidate)
+    try:
+        hostname = parsed.hostname
+    except ValueError:
+        return None
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not hostname
+        or "." not in hostname
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        return None
+    return candidate
+
+
+def rank_verified_colleges(colleges: Iterable[dict], preferences: dict) -> list[dict]:
+    """Order already-filtered, program-verified schools without LLM judgment."""
+    targets = parse_targets(preferences.get("targets", ""))
+    requested_states = {
+        state.strip().upper()
+        for state in str(preferences.get("states", "")).split(",")
+        if state.strip()
+    }
+    ranked = []
+    for college in colleges:
+        matches = college.get("matching_bachelors_fields", [])
+        field_score = max((float(item.get("match_score", 0)) for item in matches), default=0.0)
+        is_target = matches_target(college.get("school.name", ""), targets)
+        cost = college.get("latest.cost.attendance.academic_year")
+        maximum_cost = preferences.get("max_cost")
+        cost_fit = maximum_cost is not None and cost is not None and cost <= maximum_cost
+        state_fit = bool(requested_states) and college.get("school.state") in requested_states
+        score = field_score * 60
+        score += 20 if is_target else 0
+        score += 8 if state_fit else 0
+        score += 6 if cost_fit else 0
+        score += max(0.0, _size_fit(college.get("latest.student.size"), preferences.get("size", ["any"]))) * 3
+        score += max(0.0, _competition_fit(college.get("latest.admissions.admission_rate.overall"), preferences.get("competition", ["any"]))) * 3
+        reasons = [f"Reported bachelor's field match: {matches[0]['title']}" for _ in [0] if matches]
+        if is_target:
+            reasons.append("Matches a user-named target school or system")
+        if state_fit:
+            reasons.append("Matches the requested state filter")
+        if cost_fit:
+            reasons.append("Reported attendance cost is within the stated maximum")
+        enriched = {
+            **college,
+            "selection": {"ranking_score": round(score, 1), "reasons": reasons},
+            "fact_status": {
+                "admission_rate": _fact(college.get("latest.admissions.admission_rate.overall")),
+                "attendance_cost": _fact(cost),
+                "average_net_price": _fact(college.get("latest.cost.avg_net_price.overall")),
+                "undergraduate_size": _fact(college.get("latest.student.size")),
+                "reported_fields": _fact([item.get("title") for item in matches] or None),
+                "official_website": _fact(official_school_url(college.get("school.school_url"))),
+            },
+        }
+        ranked.append((is_target, score, college.get("school.name", ""), enriched))
+    ranked.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+    return [item[3] for item in ranked]
 
 
 def ask_recommendation_count(language="en") -> int:
@@ -1351,17 +1513,7 @@ def stream_college_recommendations(
     requested_count = int(preferences.pop("count", 5))
 
     base_colleges = fetch_colleges_cached(preferences)
-    colleges = filter_by_institution_format(
-        base_colleges, preferences["institution_format"]
-    )
-    colleges = filter_by_size(colleges, preferences["size"])
-    colleges = filter_by_selectivity(
-        colleges,
-        preferences["competition"],
-        preferences.get("admission_rate_min", 0),
-        preferences.get("admission_rate_max", 100),
-    )
-    colleges = filter_by_max_cost(colleges, preferences["max_cost"])
+    colleges, filter_trace = apply_college_filters(base_colleges, preferences)
     # Rank broadly, but fetch the large Scorecard CIP payload in small batches.
     # Most requests find enough supported schools in the first batch, avoiding
     # the previous unconditional 30-school programs response.
@@ -1394,6 +1546,8 @@ def stream_college_recommendations(
         if len(verified_candidates) >= requested_count:
             break
 
+    verified_candidates = rank_verified_colleges(verified_candidates, preferences)
+    filter_trace.append({"filter": "reported_field", "before": len(candidates), "after": len(verified_candidates)})
     final_count = min(requested_count, len(verified_candidates))
     if final_count == 0:
         # Keep state/ownership constraints from the Scorecard request, but relax
@@ -1404,6 +1558,9 @@ def stream_college_recommendations(
         alternatives = verify(relaxed_candidates)[: min(requested_count, 5)]
         if language == "zh":
             yield "没有大学同时满足你当前的全部筛选条件和专业领域要求。\n\n"
+            detail = format_filter_bottlenecks(filter_trace, language)
+            if detail:
+                yield detail
             if alternatives:
                 yield "如果放宽费用、规模、学校类型或竞争程度，以下学校仍有相关的 College Scorecard 本科专业领域数据：\n\n"
                 for college in alternatives:
@@ -1414,6 +1571,9 @@ def stream_college_recommendations(
             yield "\n你可以尝试扩大州范围、提高费用上限、选择不限学校规模或竞争程度，或者使用更宽泛的专业领域名称。"
         else:
             yield "No colleges matched all of your current filters and field-of-study requirement.\n\n"
+            detail = format_filter_bottlenecks(filter_trace, language)
+            if detail:
+                yield detail
             if alternatives:
                 yield "If you relax cost, size, institution format, or selectivity, these schools still have relevant College Scorecard bachelor's-field data:\n\n"
                 for college in alternatives:
@@ -1443,9 +1603,20 @@ def stream_college_recommendations(
                     field["title"]
                     for field in college.get("matching_bachelors_fields", [])
                 ],
+                "fact_status": college.get("fact_status", {}),
+                "source": "College Scorecard",
+                "source_url": "https://collegescorecard.ed.gov/data/",
+                "data_vintage": SCORECARD_DATA_VINTAGE,
+                "official_url": official_school_url(college.get("school.school_url")),
             }
             for college in verified_candidates
         ]
+    yield (
+        "**数据来源：** [College Scorecard](https://collegescorecard.ed.gov/data/)。每项指标使用接口返回的最新可用值，不同指标的报告年份可能不同；具体专业名称和当前申请要求请通过学校官网核实。\n\n"
+        if language == "zh"
+        else "**Data source:** [College Scorecard](https://collegescorecard.ed.gov/data/). Each metric uses the latest value returned by the API, and reporting years may differ; confirm exact majors and current requirements through the official university website.\n\n"
+    )
+    yield render_college_fact_cards(verified_candidates)
     preparation_seconds = time.perf_counter() - started_at
     if os.getenv("COLLEGE_GUIDANCE_DEBUG", "").lower() in {"1", "true", "yes"}:
         print(f"Web college recommendation preparation: {preparation_seconds:.2f}s")
@@ -1463,7 +1634,14 @@ If fewer are returned, the application has already shown the user a count notice
 do not repeat it. Do not derive an admission probability
 or Reach, Target, Safety, or Likely label from scores or overall admission rate.
 The requested target is {preferences.get("targets", "")!r}; only that school or
-system may be labeled as a target."""
+system may be labeled as a target.
+
+The application has already displayed deterministic fact cards for every selected
+school. Return only a `## Personalized fit explanations` section (Chinese:
+`## 个性化匹配说明`). For each school, preserve the supplied order and give its
+exact name followed by 1-2 concise sentences connecting the supplied selection
+reasons and documented student evidence. Do not repeat admission rate, cost, net
+price, size, location, reported field, source, data vintage, or website links."""
     for chunk in llm.stream(
         [
             (

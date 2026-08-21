@@ -54,3 +54,16 @@ Do not commit `.env`. Configure secrets in Render instead.
 - The bundled student profiles are synthetic demo data, not real records.
 
 Do not enable student uploads in this demo architecture.
+## Persistent student data and authentication
+
+The default `JsonProfileAdditionRepository` is intended for a single local or demo
+instance. The application now exposes a `ProfileAdditionRepository` boundary via
+`configure_profile_addition_repository(...)`, so a deployment can inject a
+transactional PostgreSQL/managed-database implementation without changing profile
+or recommendation logic.
+
+Production multi-user deployment still requires an authentication provider and a
+server-verified user/tenant ID. Do not use a client-provided profile ID as proof of
+ownership. The current server prevents a conversation session from being reused
+with another student profile, but account-level authorization must be supplied by
+the chosen identity infrastructure before storing data for unrelated users.

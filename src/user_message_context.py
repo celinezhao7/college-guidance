@@ -3,6 +3,20 @@
 import re
 
 
+_APPLICATION_PROCEDURE = re.compile(
+    r"\b(?:how (?:do|can|should|to) (?:i |we )?(?:fill|fill out|complete|submit|start)|"
+    r"help (?:me )?(?:fill|fill out|complete|submit)|application (?:form|portal|login|"
+    r"deadline|fee|fees|requirement|requirements|submission)|upload (?:a |my )?transcript)\b|"
+    r"(?:怎么|如何)(?:填写|填|提交|完成)(?:UC|大学)?申请|申请(?:表|系统|截止日期|费用|材料)(?:怎么|如何)",
+    re.IGNORECASE,
+)
+_ESSAY_SCOPE = re.compile(
+    r"\b(?:PIQs?|personal insight questions?|essay prompts?|application essays?|"
+    r"common app essays?|writing prompts?)\b|个人洞察|文书|题目推荐|推荐.*题",
+    re.IGNORECASE,
+)
+
+
 USER_MESSAGE_POLICY = """
 
 # USER MESSAGE RELEVANCE
@@ -49,5 +63,16 @@ the user asks for one.
 
 
 def response_language(configured_language: str, message: str) -> str:
-    """Prefer Chinese when the current request contains Chinese text."""
-    return "zh" if re.search(r"[\u4e00-\u9fff]", message) else configured_language
+    """Use the current message language when it is clear in either direction."""
+    chinese_count = len(re.findall(r"[\u3400-\u9fff]", message))
+    latin_count = len(re.findall(r"[A-Za-z]", message))
+    if chinese_count >= 2:
+        return "zh"
+    if chinese_count == 0 and latin_count >= 4:
+        return "en"
+    return configured_language
+
+
+def requests_application_procedure(message: str) -> bool:
+    """Identify application-form/process requests outside essay recommendation scope."""
+    return bool(_APPLICATION_PROCEDURE.search(message)) and not bool(_ESSAY_SCOPE.search(message))

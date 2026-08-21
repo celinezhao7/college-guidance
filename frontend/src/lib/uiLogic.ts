@@ -21,6 +21,24 @@ export function detectInputLanguage(message: string): "en" | "zh" | null {
   return null
 }
 
+export function smallTalkReply(message: string, language: "en" | "zh") {
+  const normalized = message.trim().toLowerCase().replace(/[^a-z0-9\u3400-\u9fff']+/g, " ").trim()
+  const asksHow = /^(?:how are you(?: doing)?|how(?:'s| is) it going|what(?:'s| is) up|how are things)$/.test(normalized)
+    || /^(?:你好吗|你怎么样|最近怎么样)$/.test(normalized)
+  if (asksHow) {
+    return language === "zh" || /[\u3400-\u9fff]/.test(message)
+      ? "我很好，谢谢！你想聊些什么？"
+      : "I’m doing well, thanks! What would you like to talk about?"
+  }
+  const thanks = /^(?:thanks|thank you|thx|谢谢|感谢)$/.test(normalized)
+  if (thanks) {
+    return language === "zh" || /[\u3400-\u9fff]/.test(message)
+      ? "不客气！"
+      : "You’re welcome!"
+  }
+  return null
+}
+
 export function annotateRecognizedPinyin(message: string) {
   const interpretations: string[] = []
   for (const { pattern, meaning } of recognizedPinyinTerms) {
@@ -48,6 +66,12 @@ export function isAmbiguousBarePromptNumber(message: string, modeId: string) {
   if (!/^[1-8]$/.test(message.trim())) return false
   if (modeId === "common_app") return Number(message.trim()) <= 7
   return modeId === "uc_piq"
+}
+
+export function explicitlyRequestedMode(message: string): "uc_piq" | "common_app" | null {
+  if (/\bpiqs?\b|personal insight questions?|个人洞察/i.test(message)) return "uc_piq"
+  if (/common\s*app|主文书/i.test(message)) return "common_app"
+  return null
 }
 
 export function containsNonPersistableContent(value: string) {

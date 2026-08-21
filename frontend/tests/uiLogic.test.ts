@@ -4,10 +4,12 @@ import { ApiError } from "@/lib/api"
 import {
   annotateRecognizedPinyin,
   detectInputLanguage,
+  explicitlyRequestedMode,
   isAmbiguousBarePromptNumber,
   isValidCollegeCount,
   persistableConversation,
   recommendationErrorMessage,
+  smallTalkReply,
 } from "@/lib/uiLogic"
 
 describe("language handling", () => {
@@ -18,6 +20,24 @@ describe("language handling", () => {
 
   it("does not classify a normal English greeting as pinyin", () => {
     expect(detectInputLanguage("hello")).toBe("en")
+  })
+})
+
+describe("small talk", () => {
+  it("answers common small talk without introducing application guidance", () => {
+    const reply = smallTalkReply("how are you doing", "en")
+    expect(reply).toBe("I’m doing well, thanks! What would you like to talk about?")
+    expect(reply).not.toContain("UC")
+    expect(reply).not.toContain("application")
+  })
+
+  it("handles Chinese small talk and thanks", () => {
+    expect(smallTalkReply("你好吗", "zh")).toContain("我很好")
+    expect(smallTalkReply("谢谢", "zh")).toBe("不客气！")
+  })
+
+  it("does not intercept substantive questions", () => {
+    expect(smallTalkReply("How should I choose a PIQ?", "en")).toBeNull()
   })
 })
 
@@ -41,6 +61,18 @@ describe("prompt-number clarification", () => {
   it("does not intercept an explicit request or an invalid prompt number", () => {
     expect(isAmbiguousBarePromptNumber("recommend 4", "common_app")).toBe(false)
     expect(isAmbiguousBarePromptNumber("8", "common_app")).toBe(false)
+  })
+})
+
+describe("explicit tool requests", () => {
+  it("recognizes PIQ requests embedded in Chinese text", () => {
+    expect(explicitlyRequestedMode("我想要四个piq推荐")).toBe("uc_piq")
+    expect(explicitlyRequestedMode("请推荐四个 PIQs")).toBe("uc_piq")
+  })
+
+  it("recognizes Common App requests without guessing ordinary college requests", () => {
+    expect(explicitlyRequestedMode("帮我选 Common App prompt")).toBe("common_app")
+    expect(explicitlyRequestedMode("推荐几个大学")).toBeNull()
   })
 })
 

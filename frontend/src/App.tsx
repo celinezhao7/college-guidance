@@ -16,6 +16,7 @@ import {
   loadStructuredProfile,
   updateProfileAddition,
   deleteProfileAddition,
+  ApiError,
   type Profile,
   type RecommendationMode,
   type CollegePreferences,
@@ -27,10 +28,12 @@ import {
 import {
   annotateRecognizedPinyin,
   detectInputLanguage,
+  explicitlyRequestedMode,
   isAmbiguousBarePromptNumber,
   isValidCollegeCount,
   persistableConversation,
   recommendationErrorMessage,
+  smallTalkReply,
 } from "@/lib/uiLogic"
 
 const defaultCollegePreferences: CollegePreferences = {
@@ -137,6 +140,7 @@ function App() {
   const modeConversationsRef = useRef<Record<string, ModeConversationState>>({})
   const submissionLockRef = useRef(false)
   const hasShownModeSwitchNoticeRef = useRef(false)
+  const freshProfileSelectionRef = useRef(false)
 
   useEffect(() => {
     const phoneViewport = window.matchMedia("(max-width: 767px)")
@@ -172,13 +176,28 @@ function App() {
     try {
       const raw = sessionStorage.getItem(storageKey(profileId))
       const stored = raw ? JSON.parse(raw) as StoredWorkspace : null
-      modeConversationsRef.current = stored?.conversations ?? {}
-      setChatArchives(stored?.archives ?? [])
-      const restoredMode = stored?.activeModeId ?? ""
-      setModeId(restoredMode)
-      applyModeConversation(
-        modeConversationsRef.current[restoredMode] ?? emptyModeConversation(),
-      )
+      if (freshProfileSelectionRef.current) {
+        freshProfileSelectionRef.current = false
+        const savedActiveChats = Object.entries(stored?.conversations ?? {}).flatMap(
+          ([savedModeId, conversation], index) => conversation.messages.length > 0 ? [{
+            id: `fresh-${Date.now()}-${index}`,
+            modeId: savedModeId,
+            conversation,
+          }] : [],
+        )
+        modeConversationsRef.current = {}
+        setChatArchives([...savedActiveChats, ...(stored?.archives ?? [])].slice(0, 20))
+        setModeId("")
+        applyModeConversation(emptyModeConversation())
+      } else {
+        modeConversationsRef.current = stored?.conversations ?? {}
+        setChatArchives(stored?.archives ?? [])
+        const restoredMode = stored?.activeModeId ?? ""
+        setModeId(restoredMode)
+        applyModeConversation(
+          modeConversationsRef.current[restoredMode] ?? emptyModeConversation(),
+        )
+      }
     } catch {
       modeConversationsRef.current = {}
       setChatArchives([])
@@ -245,6 +264,29 @@ function App() {
     setPendingLanguageSwitch(null)
     setLanguageCheckBypass(null)
     const semanticInput = annotateRecognizedPinyin(trimmedInput)
+    const explicitlyRequestedTool = explicitlyRequestedMode(trimmedInput)
+    if (explicitlyRequestedTool && explicitlyRequestedTool !== modeId) {
+      brieflyLockSubmission()
+      const replyInChinese = language === "zh" || /[\u4e00-\u9fff]/.test(trimmedInput)
+      const selectedTool = modeId === "college_field"
+        ? (replyInChinese ? "大学与专业探索" : "College & Field Explorer")
+        : modeId === "common_app" ? "Common App" : "UC PIQ"
+      const requestedTool = explicitlyRequestedTool === "uc_piq" ? "UC PIQ" : "Common App"
+      setMessages((previous) => [
+        ...previous,
+        { role: "user", content: trimmedInput },
+        {
+          role: "assistant",
+          content: replyInChinese
+            ? `你当前使用的是“${selectedTool}”，这里不会生成 ${requestedTool} 推荐。请先点击上方的“${requestedTool}”功能，再发送这条请求。`
+            : `You’re currently using ${selectedTool}, which does not generate ${requestedTool} recommendations. Select ${requestedTool} above, then send this request again.`,
+        },
+      ])
+      setQuickReplies([])
+      setAwaitingPreference(null)
+      setInput("")
+      return
+    }
 
     const latestAssistant = [...messages].reverse().find((message) => message.role === "assistant")
     const evidenceQuestion = editingProfileAdditionQuestion
@@ -329,7 +371,8 @@ function App() {
       return
     }
 
-    const casualReply = getCasualFeedbackReply(trimmedInput, language)
+    const casualReply = smallTalkReply(trimmedInput, detectedLanguage ?? language)
+      ?? getCasualFeedbackReply(trimmedInput, language)
     if (casualReply) {
       brieflyLockSubmission()
       setMessages((previous) => [
@@ -714,6 +757,7 @@ function App() {
     setModeSwitchNotice("")
     hasShownModeSwitchNoticeRef.current = false
     setCollegePreferences(defaultCollegePreferences)
+    freshProfileSelectionRef.current = true
   }
 
   function resetConversationState() {
@@ -753,7 +797,7 @@ function App() {
     try {
       const [records, profile] = await Promise.all([
         loadProfileAdditions(profileId),
-        loadStructuredProfile(profileId),
+        loadStructuredProfile(profileId, language),
       ])
       setProfileAdditionRecords(records)
       setStructuredProfile(profile)
@@ -768,10 +812,32 @@ function App() {
     try {
       const updated = await updateProfileAddition(profileId, id, addition)
       setProfileAdditionRecords((previous) => previous.map((item) => item.id === id ? updated : item))
-      setStructuredProfile(await loadStructuredProfile(profileId))
+      setStructuredProfile(await loadStructuredProfile(profileId, language))
       setProfileManagerError("")
     } catch (error) {
       setProfileManagerError(error instanceof Error ? error.message : "Could not update profile information.")
+      throw error
+    }
+  }
+
+  async function handleCreateProfileRecord(addition: ProfileAddition) {
+    try {
+      let created: ProfileAdditionRecord
+      try {
+        created = await saveProfileAddition(profileId, addition)
+      } catch (error) {
+        if (!(error instanceof ApiError) || error.status !== 409) throw error
+        const confirmed = window.confirm(language === "zh"
+          ? "这条信息可能与同一经历中已保存的数字或表述冲突。仍然保存，并保留两条信息吗？"
+          : "This may conflict with a number or statement already saved for the same experience. Save both versions anyway?")
+        if (!confirmed) return
+        created = await saveProfileAddition(profileId, addition, true)
+      }
+      setProfileAdditionRecords((previous) => previous.some((item) => item.id === created.id) ? previous : [...previous, created])
+      setStructuredProfile(await loadStructuredProfile(profileId, language))
+      setProfileManagerError("")
+    } catch (error) {
+      setProfileManagerError(error instanceof Error ? error.message : "Could not save profile information.")
       throw error
     }
   }
@@ -780,7 +846,7 @@ function App() {
     try {
       await deleteProfileAddition(profileId, id)
       setProfileAdditionRecords((previous) => previous.filter((item) => item.id !== id))
-      setStructuredProfile(await loadStructuredProfile(profileId))
+      setStructuredProfile(await loadStructuredProfile(profileId, language))
       setProfileManagerError("")
     } catch (error) {
       setProfileManagerError(error instanceof Error ? error.message : "Could not delete profile information.")
@@ -789,6 +855,7 @@ function App() {
 
   function handleModeChange(nextModeId: string) {
     if (nextModeId === modeId) return
+    freshProfileSelectionRef.current = false
     if (modeId) {
       modeConversationsRef.current[modeId] = {
         input,
@@ -903,6 +970,7 @@ function App() {
         loading={profileManagerLoading}
         error={profileManagerError}
         onClose={() => setProfileManagerOpen(false)}
+        onCreate={handleCreateProfileRecord}
         onUpdate={handleUpdateProfileRecord}
         onDelete={handleDeleteProfileRecord}
       />
@@ -919,7 +987,8 @@ function App() {
       <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <button
           type="button"
-          className="absolute left-4 top-[max(1rem,env(safe-area-inset-top))] z-20 flex h-10 w-10 items-center justify-center rounded-xl border border-[#dedbe9] bg-white/85 text-[#5d5970] shadow-sm backdrop-blur md:hidden"
+          data-dialog-return
+          className="absolute left-4 top-[max(1rem,env(safe-area-inset-top))] z-20 flex h-11 w-11 items-center justify-center rounded-xl border border-[#dedbe9] bg-white/85 text-[#5d5970] shadow-sm backdrop-blur md:hidden"
           onClick={() => setMobileSidebarOpen(true)}
           aria-label={zh ? "打开菜单" : "Open menu"}
         >
@@ -928,7 +997,7 @@ function App() {
         {!desktopSidebarOpen && (
           <button
             type="button"
-            className="absolute left-4 top-4 z-20 hidden h-10 w-10 items-center justify-center rounded-xl border border-[#dedbe9] bg-white/85 text-[#5d5970] shadow-sm backdrop-blur transition hover:bg-white md:flex"
+            className="absolute left-4 top-4 z-20 hidden h-11 w-11 items-center justify-center rounded-xl border border-[#dedbe9] bg-white/85 text-[#5d5970] shadow-sm backdrop-blur transition hover:bg-white md:flex"
             onClick={() => setDesktopSidebarOpen(true)}
             aria-label={zh ? "打开侧栏" : "Open sidebar"}
           >
@@ -1088,8 +1157,7 @@ function App() {
                   )}
                 </div>
               </div>
-            </ScrollArea>
-            <div className="px-6 pb-6">
+            <div className="sticky bottom-0 bg-white/95 px-6 pb-6 pt-2 backdrop-blur-sm">
               <div className="mx-auto w-full max-w-3xl">
                 {modeId === "college_field" && answeredPreferences.length > 0 && (
                   <PreferenceSummary
@@ -1152,9 +1220,11 @@ function App() {
                   isGenerating={canStopGeneration}
                   onStop={handleStopGeneration}
                   stopLabel={zh ? "停止生成" : "Stop generating"}
+                  sendLabel={zh ? "发送消息" : "Send message"}
                 />
               </div>
             </div>
+            </ScrollArea>
           </>
         )}
       </main>
@@ -1193,15 +1263,15 @@ function LanguageSwitchPrompt({
     <div className="language-switch-card mb-3 rounded-2xl px-4 py-3 text-sm text-zinc-700" role="status">
       <p>
         {switchingToChinese
-          ? "检测到你输入了中文。是否切换到中文模式？"
-          : "检测到你输入了英文。是否切换到英文模式？"}
+          ? "检测到你输入了中文，本次回答将使用中文。是否同时切换界面语言？"
+          : "检测到你输入了英文，本次回答将使用英文。是否同时切换界面语言？"}
       </p>
       <div className="mt-3 flex flex-wrap gap-2">
         <button type="button" className="language-switch-button is-primary" onClick={onSwitch}>
           {switchingToChinese ? "切换到中文" : "切换到英文"}
         </button>
         <button type="button" className="language-switch-button is-secondary" onClick={onKeep}>
-          {switchingToChinese ? "继续使用英文" : "继续使用中文"}
+          {switchingToChinese ? "仅本次回答中文" : "仅本次回答英文"}
         </button>
       </div>
     </div>
@@ -1388,9 +1458,9 @@ function CollegeCountInput({ language, disabled, initialValue, onSubmit }: { lan
     <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#e1dee9] bg-white/80 p-3 shadow-sm">
       <span className="text-sm text-zinc-600">{zh ? "推荐数量" : "Number of colleges"}</span>
       <div className="flex items-center gap-2">
-        <button type="button" className="flex h-9 w-9 items-center justify-center rounded-full border border-[#d7d3e1] bg-white text-[#625e70] hover:bg-[#f5f3f7] disabled:opacity-40" disabled={disabled || count <= 1} onClick={() => setCount((value) => Math.max(1, value - 1))} aria-label={zh ? "减少数量" : "Decrease count"}><Minus className="h-4 w-4" /></button>
+        <button type="button" className="flex h-11 w-11 items-center justify-center rounded-full border border-[#d7d3e1] bg-white text-[#625e70] hover:bg-[#f5f3f7] disabled:opacity-40" disabled={disabled || count <= 1} onClick={() => setCount((value) => Math.max(1, value - 1))} aria-label={zh ? "减少数量" : "Decrease count"}><Minus className="h-4 w-4" /></button>
         <input className="h-9 w-14 rounded-lg border border-[#d7d3e1] bg-white text-center text-sm tabular-nums outline-none focus:border-[#9993b7] focus:ring-2 focus:ring-[#b8b4d8]/25" type="number" min="1" max="20" value={count} disabled={disabled} onChange={(event) => setCount(Math.min(20, Math.max(1, Number(event.target.value) || 1)))} aria-label={zh ? "推荐大学数量" : "College count"} />
-        <button type="button" className="flex h-9 w-9 items-center justify-center rounded-full border border-[#d7d3e1] bg-white text-[#625e70] hover:bg-[#f5f3f7] disabled:opacity-40" disabled={disabled || count >= 20} onClick={() => setCount((value) => Math.min(20, value + 1))} aria-label={zh ? "增加数量" : "Increase count"}><Plus className="h-4 w-4" /></button>
+        <button type="button" className="flex h-11 w-11 items-center justify-center rounded-full border border-[#d7d3e1] bg-white text-[#625e70] hover:bg-[#f5f3f7] disabled:opacity-40" disabled={disabled || count >= 20} onClick={() => setCount((value) => Math.min(20, value + 1))} aria-label={zh ? "增加数量" : "Increase count"}><Plus className="h-4 w-4" /></button>
         <button type="button" className="quick-reply ml-1" disabled={disabled} onClick={() => onSubmit(count)}>{zh ? "确认" : "Apply"}</button>
       </div>
     </div>

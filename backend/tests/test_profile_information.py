@@ -5,12 +5,31 @@ from unittest.mock import patch
 
 from docx import Document
 
-from backend.app.profile_information import build_structured_profile
+from backend.app.profile_information import _cached_docx_text, _docx_text, build_structured_profile
 from backend.app.profile_service import StudentProfile
 from backend.app.schemas import ProfileAdditionRecord
 
 
 class StructuredProfileTests(unittest.TestCase):
+    def tearDown(self) -> None:
+        _cached_docx_text.cache_clear()
+
+    def test_unchanged_docx_text_is_cached_and_file_change_invalidates_it(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "student.docx"
+            document = Document()
+            document.add_paragraph("First version")
+            document.save(path)
+            self.assertEqual("First version", _docx_text(path))
+            self.assertEqual("First version", _docx_text(path))
+            self.assertEqual(1, _cached_docx_text.cache_info().hits)
+
+            document = Document()
+            document.add_paragraph("Second, longer version")
+            document.save(path)
+            self.assertEqual("Second, longer version", _docx_text(path))
+            self.assertEqual(2, _cached_docx_text.cache_info().misses)
+
     def test_original_and_confirmed_evidence_are_merged_with_sources(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "student.docx"

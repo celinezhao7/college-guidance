@@ -63,6 +63,7 @@ class ProfileAdditionPreviewRequest(BaseModel):
 class ProfileAdditionSaveRequest(BaseModel):
     profile_id: str
     addition: ProfileAddition
+    confirm_warnings: bool = False
 
 
 class ProfileAdditionRecord(ProfileAddition):

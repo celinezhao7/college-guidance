@@ -103,6 +103,40 @@ class OutputGuardTests(unittest.TestCase):
         self.assertFalse(result.allowed)
         self.assertEqual(result.category, OutputCategory.UNGROUNDED_FACT)
 
+    def test_fact_from_one_school_cannot_be_assigned_to_another(self) -> None:
+        facts = {
+            "schools": [
+                self.COLLEGE_FACTS["schools"][0],
+                {
+                    "name": "Second University", "admission_rate": 0.7,
+                    "cost": 30000, "net_price": None, "size": 5000,
+                    "fields": ["Biology"],
+                },
+            ]
+        }
+        result = validate_generated_output(
+            "## 1. Second University\n\nAdmission rate: 42.3%\n",
+            application_type="college_major",
+            fact_reference=facts,
+        )
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.category, OutputCategory.UNGROUNDED_FACT)
+
+    def test_unavailable_metric_cannot_be_invented(self) -> None:
+        facts = {
+            "schools": [{
+                "name": "No Data College", "admission_rate": None,
+                "cost": None, "net_price": None, "size": None, "fields": [],
+            }]
+        }
+        result = validate_generated_output(
+            "## 1. No Data College\n\nAdmission rate: 50%\n",
+            application_type="college_major",
+            fact_reference=facts,
+        )
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.category, OutputCategory.UNGROUNDED_FACT)
+
     def test_invented_reported_field_is_blocked(self) -> None:
         result = validate_generated_output(
             "### 1. Example University\n\n**Matching reported field:** Quantum Wizardry\n",

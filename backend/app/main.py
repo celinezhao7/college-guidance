@@ -14,7 +14,9 @@ from src.safety import SafetyAction, validate_input
 
 from .profile_service import get_profile, list_profiles
 from .profile_information import build_structured_profile
+from .profile_localization import localize_profile
 from .profile_additions import (
+    addition_conflicts,
     delete_addition,
     format_additions,
     list_addition_records,
@@ -185,6 +187,16 @@ def profile_addition_save(payload: ProfileAdditionSaveRequest, request: Request)
     combined = "\n".join(
         [payload.addition.action, payload.addition.outcome, payload.addition.reflection]
     )
+    if not (payload.addition.experience_title or "").strip() and payload.addition.experience_number is None:
+        raise HTTPException(status_code=422, detail="An experience title or number is required.")
+    if not combined.strip():
+        raise HTTPException(status_code=422, detail="Add at least one action, outcome, or reflection.")
+    conflicts = addition_conflicts(payload.profile_id, payload.addition)
+    if conflicts and not payload.confirm_warnings:
+        raise HTTPException(
+            status_code=409,
+            detail="Potentially conflicting profile fields: " + ", ".join(conflicts),
+        )
     safety = validate_input(combined, "student_kb")
     if not safety.allowed or safety.action is SafetyAction.REDACT:
         raise HTTPException(status_code=400, detail="This information cannot be saved.")
@@ -207,11 +219,12 @@ def profile_addition_list(profile_id: str):
     response_model=StructuredStudentProfile,
     tags=["profiles"],
 )
-def structured_profile_information(profile_id: str):
+def structured_profile_information(profile_id: str, language: str = "en"):
     profile = get_profile(profile_id)
     if profile is None:
         raise HTTPException(status_code=404, detail="Student profile not found.")
-    return build_structured_profile(profile, list_addition_records(profile_id))
+    structured = build_structured_profile(profile, list_addition_records(profile_id))
+    return localize_profile(structured, language)
 
 
 @app.put(

@@ -1,0 +1,12 @@
+[
+  {
+    "school": "University of California-Los Angeles",
+    "aliases": ["UCLA", "University of California, Los Angeles"],
+    "allowed_domains": ["admission.ucla.edu"],
+    "pages": [
+      {"kind": "majors", "url": "https://admission.ucla.edu/apply/majors"},
+      {"kind": "first_year_requirements", "url": "https://admission.ucla.edu/apply/first-year/first-year-requirements"},
+      {"kind": "cost", "url": "https://admission.ucla.edu/tuition-aid/tuition-fees"}
+    ]
+  }
+]

@@ -291,11 +291,11 @@ export async function previewProfileAddition(request: {
   return response.json() as Promise<ProfileAddition>
 }
 
-export async function saveProfileAddition(profileId: string, addition: ProfileAddition) {
+export async function saveProfileAddition(profileId: string, addition: ProfileAddition, confirmWarnings = false) {
   const response = await fetch("/api/profile-additions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ profile_id: profileId, addition }),
+    body: JSON.stringify({ profile_id: profileId, addition, confirm_warnings: confirmWarnings }),
   })
   if (!response.ok) throw await responseError(response)
   return response.json() as Promise<ProfileAdditionRecord>
@@ -305,8 +305,8 @@ export async function loadProfileAdditions(profileId: string) {
   return requestJson<ProfileAdditionRecord[]>(`/api/profile-additions/${profileId}`)
 }
 
-export async function loadStructuredProfile(profileId: string) {
-  return requestJson<StructuredStudentProfile>(`/api/profiles/${profileId}/information`)
+export async function loadStructuredProfile(profileId: string, language: "en" | "zh") {
+  return requestJson<StructuredStudentProfile>(`/api/profiles/${profileId}/information?language=${language}`)
 }
 
 export async function updateProfileAddition(

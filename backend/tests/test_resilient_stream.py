@@ -1,6 +1,6 @@
 import unittest
 
-from backend.app.streaming import resilient_stream
+from backend.app.streaming import resilient_stream, stream_error_message
 
 
 class ResilientStreamTests(unittest.TestCase):
@@ -37,6 +37,29 @@ class ResilientStreamTests(unittest.TestCase):
         self.assertEqual(attempts, 1)
         self.assertIn("Partial answer", result)
         self.assertIn("connection was interrupted", result)
+
+    def test_missing_scorecard_key_is_actionable_and_not_retried(self) -> None:
+        attempts = 0
+
+        def factory():
+            nonlocal attempts
+            attempts += 1
+            raise RuntimeError("COLLEGE_SCORECARD_API_KEY is missing from .env")
+
+        result = "".join(resilient_stream(factory, language="en"))
+        self.assertEqual(1, attempts)
+        self.assertIn("not configured", result)
+        self.assertNotIn(".env", result)
+
+    def test_scorecard_rate_limit_and_outage_are_distinguished(self) -> None:
+        self.assertIn(
+            "rate-limiting",
+            stream_error_message(RuntimeError("College Scorecard returned HTTP 429"), "en"),
+        )
+        self.assertIn(
+            "无法连接 College Scorecard",
+            stream_error_message(RuntimeError("Could not reach College Scorecard: timeout"), "zh"),
+        )
 
 
 if __name__ == "__main__":

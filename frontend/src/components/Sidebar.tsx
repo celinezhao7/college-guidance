@@ -27,7 +27,7 @@ type SidebarProps = {
 const selectClassName =
   "h-10 w-full rounded-lg border border-[#dddce7] bg-white/75 px-3 py-2 text-sm shadow-[0_2px_10px_rgba(84,78,112,0.035)] outline-none transition focus:border-[#aaa6ca] focus:ring-2 focus:ring-[#b8b4d8]/20 disabled:opacity-50"
 const headerControlClassName =
-  "flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[#d5d2e2] bg-white/55 text-xs font-medium text-[#625e70] transition hover:border-[#aaa6ca] hover:bg-white/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b8b4d8]/35 disabled:opacity-50"
+  "flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#d5d2e2] bg-white/55 text-xs font-medium text-[#625e70] transition hover:border-[#aaa6ca] hover:bg-white/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b8b4d8]/35 disabled:opacity-50"
 
 export function Sidebar({
   profiles,
@@ -85,7 +85,7 @@ export function Sidebar({
       </div>
       <Button
         variant="ghost"
-        className="mx-1 h-10 justify-start gap-2 rounded-lg text-[#45445a] hover:bg-white/55 hover:text-[#343247]"
+        className="mx-1 h-11 justify-start gap-2 rounded-lg text-[#45445a] hover:bg-white/55 hover:text-[#343247]"
         onClick={() => {
           onNewChat()
           onMobileClose()
@@ -96,36 +96,38 @@ export function Sidebar({
       </Button>
 
       <div className="mt-5 space-y-5 px-1">
-        <label className="block space-y-2">
-          <span className="text-xs font-medium text-zinc-500">{zh ? "学生档案" : "Student profile"}</span>
-          <select
-            className={selectClassName}
-            value={profileId}
-            disabled={disabled}
-            onChange={(event) => {
-              onProfileChange(event.target.value)
+        <div className="space-y-1">
+          <label className="block space-y-2">
+            <span className="text-xs font-medium text-zinc-500">{zh ? "学生档案" : "Student profile"}</span>
+            <select
+              className={selectClassName}
+              value={profileId}
+              disabled={disabled}
+              onChange={(event) => {
+                onProfileChange(event.target.value)
+                onMobileClose()
+              }}
+            >
+              {profiles.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {zh ? profile.display_name_zh : profile.display_name_en}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            className="flex min-h-11 w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs text-[#67627b] transition hover:bg-white/55"
+            disabled={disabled || !profileId}
+            onClick={() => {
+              onManageProfile()
               onMobileClose()
             }}
           >
-            {profiles.map((profile) => (
-              <option key={profile.id} value={profile.id}>
-                {zh ? profile.display_name_zh : profile.display_name_en}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button
-          type="button"
-          className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-[#67627b] transition hover:bg-white/55"
-          disabled={disabled || !profileId}
-          onClick={() => {
-            onManageProfile()
-            onMobileClose()
-          }}
-        >
-          <UserRoundPen className="h-3.5 w-3.5" />
-          {zh ? "管理补充画像信息" : "Manage profile information"}
-        </button>
+            <UserRoundPen className="h-3.5 w-3.5" />
+            {zh ? "管理补充画像信息" : "Manage profile information"}
+          </button>
+        </div>
 
         <label className="block space-y-2">
           <span className="text-xs font-medium text-zinc-500">{zh ? "推荐类型" : "Recommendation"}</span>
@@ -152,7 +154,7 @@ export function Sidebar({
       </div>
 
       {historyItems.length > 0 && (
-        <section className="mt-6 min-h-0 px-1">
+        <section className="mt-4 min-h-0 px-1">
           <h2 className="mb-2 px-2 text-xs font-medium text-zinc-500">
             {zh ? "最近对话" : "Recent chats"}
           </h2>

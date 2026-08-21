@@ -41,9 +41,12 @@ def list_profiles() -> list[StudentProfile]:
         "兴趣模糊学生档案": 2,
     }
     english_names = {
-        "完整学生档案": "Complete Student Profile",
+        "完整学生档案": "Relatively Complete Student Profile",
         "信息不足学生档案": "Limited-Information Student Profile",
         "兴趣模糊学生档案": "Broad-Interest Student Profile",
+    }
+    chinese_names = {
+        "完整学生档案": "相对完整学生档案",
     }
     paths = sorted(
         directory.glob("*.docx"),
@@ -57,7 +60,7 @@ def list_profiles() -> list[StudentProfile]:
             id=_profile_id(path.name),
             display_name=path.stem,
             display_name_en=english_names.get(path.stem, path.stem),
-            display_name_zh=path.stem,
+            display_name_zh=chinese_names.get(path.stem, path.stem),
             filename=path.name,
         )
         for path in paths

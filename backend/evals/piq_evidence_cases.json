@@ -1,0 +1,30 @@
+[
+  {
+    "name": "complete experience needs no gap",
+    "context": "Experience 1: Research Project\nActions: Designed and ran interviews.\nOutcome: Presented findings to the class.\nReflection: Learned to revise assumptions.\n",
+    "requested_count": 1,
+    "well_supported_count": 1,
+    "top_gap": null
+  },
+  {
+    "name": "challenge is not an action",
+    "context": "Experience 1: Moving Schools\nChallenge: Entered a new language environment.\nOutcome: Adapted to the new school.\nReflection: Learned persistence.\n",
+    "requested_count": 1,
+    "well_supported_count": 0,
+    "top_gap": ["Experience 1: Moving Schools", "action"]
+  },
+  {
+    "name": "nearly viable experience beats sparse experience",
+    "context": "Experience 1: Garden\nActions: Organized weekly maintenance.\nOutcome: Not documented.\nReflection: Learned shared responsibility.\nExperience 2: Public Health\nBackground: Read an article.\n",
+    "requested_count": 2,
+    "well_supported_count": 0,
+    "top_gap": ["Experience 1: Garden", "outcome"]
+  },
+  {
+    "name": "placeholder values count as missing",
+    "context": "Experience 1: Club\nActions: Not provided.\nOutcome: No broader impact documented.\nReflection: Unsure.\n",
+    "requested_count": 1,
+    "well_supported_count": 0,
+    "top_gap": ["Experience 1: Club", "action"]
+  }
+]
