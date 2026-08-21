@@ -96,54 +96,42 @@ STUDENT_DB_DIR = BASE_DIR / "chroma" / "student"
 # Must match build_index.py
 # ============================================================
 
-embeddings = OpenAIEmbeddings(
-    model="text-embedding-v4",
-    api_key=os.getenv("DASHSCOPE_API_KEY"),
-    base_url=os.getenv("DASHSCOPE_BASE_URL"),
-    check_embedding_ctx_length=False,
-    dimensions=1024,
-    chunk_size=10,
-)
+@lru_cache(maxsize=1)
+def get_embeddings():
+    """Create the remote embedding client only when retrieval is requested."""
+    return OpenAIEmbeddings(
+        model="text-embedding-v4",
+        api_key=os.getenv("DASHSCOPE_API_KEY"),
+        base_url=os.getenv("DASHSCOPE_BASE_URL"),
+        check_embedding_ctx_length=False,
+        dimensions=1024,
+        chunk_size=10,
+    )
 
 
-# ============================================================
-# Load vector stores
-# ============================================================
-
-uc_vectorstore = Chroma(
-    collection_name="uc_official",
-    persist_directory=str(UC_DB_DIR),
-    embedding_function=embeddings,
-)
-
-common_app_vectorstore = Chroma(
-    collection_name="common_app_official",
-    persist_directory=str(COMMON_APP_DB_DIR),
-    embedding_function=embeddings,
-)
-
-student_vectorstore = Chroma(
-    collection_name="student_evidence",
-    persist_directory=str(STUDENT_DB_DIR),
-    embedding_function=embeddings,
-)
-
-
-# ============================================================
-# Retrievers
-# ============================================================
-
-uc_retriever = uc_vectorstore.as_retriever(
-    search_kwargs={
-        "k": 3
+@lru_cache(maxsize=3)
+def get_vectorstore(kind: str):
+    settings = {
+        "uc": ("uc_official", UC_DB_DIR),
+        "common_app": ("common_app_official", COMMON_APP_DB_DIR),
+        "student": ("student_evidence", STUDENT_DB_DIR),
     }
-)
+    if kind not in settings:
+        raise ValueError(f"Unsupported vector store: {kind}")
+    collection_name, persist_directory = settings[kind]
+    return Chroma(
+        collection_name=collection_name,
+        persist_directory=str(persist_directory),
+        embedding_function=get_embeddings(),
+    )
 
-common_app_retriever = common_app_vectorstore.as_retriever(
-    search_kwargs={
-        "k": 7
-    }
-)
+
+def create_guidance_retriever(application_type: str):
+    if application_type == "uc":
+        return get_vectorstore("uc").as_retriever(search_kwargs={"k": 3})
+    if application_type == "common_app":
+        return get_vectorstore("common_app").as_retriever(search_kwargs={"k": 7})
+    raise ValueError(f"Unsupported guidance retriever: {application_type}")
 
 def create_student_retrievers(profile_name: str):
     profile_filter = {
@@ -152,6 +140,7 @@ def create_student_retrievers(profile_name: str):
             {"source": profile_name},
         ]
     }
+    student_vectorstore = get_vectorstore("student")
     student_retriever = student_vectorstore.as_retriever(
         search_kwargs={"k": 8, "filter": profile_filter}
     )
@@ -170,7 +159,7 @@ def get_all_student_context(profile_name: str) -> str:
 
 
 def is_student_profile_indexed(profile_name: str) -> bool:
-    result = student_vectorstore.get(
+    result = get_vectorstore("student").get(
         where={"source": profile_name},
         limit=1,
         include=["metadatas"],
@@ -1009,12 +998,12 @@ def stream_recommendation(
         return
 
     if application_type == "uc":
-        guidance_retriever = uc_retriever
+        guidance_retriever = create_guidance_retriever("uc")
         guidance_query = UC_QUERY
         system_prompt = UC_SYSTEM_PROMPT + output_language_instruction(language)
 
     elif application_type == "common_app":
-        guidance_retriever = common_app_retriever
+        guidance_retriever = create_guidance_retriever("common_app")
         guidance_query = COMMON_APP_QUERY
         system_prompt = (
             COMMON_APP_SYSTEM_PROMPT
@@ -1473,7 +1462,7 @@ def main():
 
     if application_type == "uc":
 
-        guidance_retriever = uc_retriever
+        guidance_retriever = create_guidance_retriever("uc")
         guidance_query = UC_QUERY
 
         system_prompt = UC_SYSTEM_PROMPT + output_language_instruction(language)
@@ -1483,7 +1472,7 @@ def main():
 
     else:
 
-        guidance_retriever = common_app_retriever
+        guidance_retriever = create_guidance_retriever("common_app")
         guidance_query = COMMON_APP_QUERY
 
         system_prompt = COMMON_APP_SYSTEM_PROMPT + output_language_instruction(language)
