@@ -32,6 +32,50 @@ export type QuickReply = {
   label: string
 }
 
+export type ProfileAddition = {
+  experience_number: number | null
+  experience_title: string | null
+  action: string
+  outcome: string
+  reflection: string
+  source: string
+}
+
+export type ProfileAdditionRecord = ProfileAddition & {
+  id: string
+  confirmed_at: string
+}
+
+export type StructuredExperience = {
+  experience_number: number | null
+  experience_title: string
+  category: string
+  background: string
+  challenge: string
+  action: string
+  outcome: string
+  reflection: string
+  traits: string[]
+  missing_fields: Array<"action" | "outcome" | "reflection">
+  status: "documented" | "enriched" | "user_confirmed"
+  sources: Array<{
+    kind: "original_profile" | "user_confirmed"
+    label: string
+    record_id: string | null
+    confirmed_at: string | null
+  }>
+  additions: ProfileAdditionRecord[]
+}
+
+export type StructuredStudentProfile = {
+  profile_id: string
+  profile_name: string
+  academic_interests: string[]
+  background: string[]
+  core_themes: string[]
+  experiences: StructuredExperience[]
+}
+
 const RECOMMENDATION_TOTAL_TIMEOUT_MS = 180_000
 const RECOMMENDATION_IDLE_TIMEOUT_MS = 45_000
 
@@ -227,4 +271,61 @@ export async function continueCollegeConversation(request: {
     awaiting: string | null
     session_reset: boolean
   }>
+}
+
+export async function previewProfileAddition(request: {
+  profileId: string
+  question: string
+  answer: string
+}) {
+  const response = await fetch("/api/profile-additions/preview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      profile_id: request.profileId,
+      question: request.question,
+      answer: request.answer,
+    }),
+  })
+  if (!response.ok) throw await responseError(response)
+  return response.json() as Promise<ProfileAddition>
+}
+
+export async function saveProfileAddition(profileId: string, addition: ProfileAddition) {
+  const response = await fetch("/api/profile-additions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ profile_id: profileId, addition }),
+  })
+  if (!response.ok) throw await responseError(response)
+  return response.json() as Promise<ProfileAdditionRecord>
+}
+
+export async function loadProfileAdditions(profileId: string) {
+  return requestJson<ProfileAdditionRecord[]>(`/api/profile-additions/${profileId}`)
+}
+
+export async function loadStructuredProfile(profileId: string) {
+  return requestJson<StructuredStudentProfile>(`/api/profiles/${profileId}/information`)
+}
+
+export async function updateProfileAddition(
+  profileId: string,
+  additionId: string,
+  addition: ProfileAddition,
+) {
+  const response = await fetch(`/api/profile-additions/${profileId}/${additionId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(addition),
+  })
+  if (!response.ok) throw await responseError(response)
+  return response.json() as Promise<ProfileAdditionRecord>
+}
+
+export async function deleteProfileAddition(profileId: string, additionId: string) {
+  const response = await fetch(`/api/profile-additions/${profileId}/${additionId}`, {
+    method: "DELETE",
+  })
+  if (!response.ok) throw await responseError(response)
 }

@@ -1,6 +1,7 @@
 """Response models exposed by the College Guidance API."""
 
 from pydantic import BaseModel, Field
+from typing import Literal
 
 
 class HealthResponse(BaseModel):
@@ -42,6 +43,63 @@ class RecommendationRequest(BaseModel):
     college_preferences: "CollegePreferences | None" = None
     college_scenario: str | None = None
     history: list[RecommendationTurn] = Field(default_factory=list, max_length=8)
+
+
+class ProfileAddition(BaseModel):
+    experience_number: int | None = Field(default=None, ge=1)
+    experience_title: str | None = Field(default=None, max_length=300)
+    action: str = Field(default="", max_length=5_000)
+    outcome: str = Field(default="", max_length=5_000)
+    reflection: str = Field(default="", max_length=5_000)
+    source: Literal["user_confirmed"] = "user_confirmed"
+
+
+class ProfileAdditionPreviewRequest(BaseModel):
+    profile_id: str
+    question: str = Field(max_length=5_000)
+    answer: str = Field(max_length=5_000)
+
+
+class ProfileAdditionSaveRequest(BaseModel):
+    profile_id: str
+    addition: ProfileAddition
+
+
+class ProfileAdditionRecord(ProfileAddition):
+    id: str
+    confirmed_at: str
+
+
+class ProfileEvidenceSource(BaseModel):
+    kind: Literal["original_profile", "user_confirmed"]
+    label: str
+    record_id: str | None = None
+    confirmed_at: str | None = None
+
+
+class StructuredExperience(BaseModel):
+    experience_number: int | None = None
+    experience_title: str
+    category: str = ""
+    background: str = ""
+    challenge: str = ""
+    action: str = ""
+    outcome: str = ""
+    reflection: str = ""
+    traits: list[str] = Field(default_factory=list)
+    missing_fields: list[Literal["action", "outcome", "reflection"]] = Field(default_factory=list)
+    status: Literal["documented", "enriched", "user_confirmed"]
+    sources: list[ProfileEvidenceSource] = Field(default_factory=list)
+    additions: list[ProfileAdditionRecord] = Field(default_factory=list)
+
+
+class StructuredStudentProfile(BaseModel):
+    profile_id: str
+    profile_name: str
+    academic_interests: list[str] = Field(default_factory=list)
+    background: list[str] = Field(default_factory=list)
+    core_themes: list[str] = Field(default_factory=list)
+    experiences: list[StructuredExperience] = Field(default_factory=list)
 
 
 class CollegePreferences(BaseModel):

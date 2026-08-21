@@ -1,4 +1,4 @@
-import { MessageSquareText, Plus, ShieldCheck, X } from "lucide-react"
+import { MessageSquareText, Plus, UserRoundPen, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import type { Profile, RecommendationMode } from "@/lib/api"
@@ -15,6 +15,7 @@ type SidebarProps = {
   modeHistoryIds: string[]
   historyItems: Array<{ id: string; modeId: string; title: string; preview: string }>
   onProfileChange: (value: string) => void
+  onManageProfile: () => void
   onModeChange: (value: string) => void
   onLanguageChange: (value: "en" | "zh") => void
   onNewChat: () => void
@@ -40,6 +41,7 @@ export function Sidebar({
   modeHistoryIds,
   historyItems,
   onProfileChange,
+  onManageProfile,
   onModeChange,
   onLanguageChange,
   onNewChat,
@@ -112,6 +114,18 @@ export function Sidebar({
             ))}
           </select>
         </label>
+        <button
+          type="button"
+          className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-[#67627b] transition hover:bg-white/55"
+          disabled={disabled || !profileId}
+          onClick={() => {
+            onManageProfile()
+            onMobileClose()
+          }}
+        >
+          <UserRoundPen className="h-3.5 w-3.5" />
+          {zh ? "管理补充画像信息" : "Manage profile information"}
+        </button>
 
         <label className="block space-y-2">
           <span className="text-xs font-medium text-zinc-500">{zh ? "推荐类型" : "Recommendation"}</span>
@@ -165,20 +179,6 @@ export function Sidebar({
         </section>
       )}
 
-      <section className="relative mx-1 mb-1 mt-auto overflow-hidden rounded-xl border border-[#dedbe9] bg-gradient-to-br from-white/70 via-[#f4f1fa]/75 to-[#fbf1e9]/65 p-4 shadow-[0_8px_24px_rgba(83,75,111,0.05)]">
-        <div className="absolute right-3 top-3 h-1.5 w-1.5 rounded-full bg-[#dda06f]/70" aria-hidden="true" />
-        <div className="mb-2 flex items-center gap-2 text-[#494664]">
-          <ShieldCheck className="h-4 w-4 text-[#6f6a92]" />
-          <h2 className="text-xs font-semibold">
-            {zh ? "推荐如何产生" : "How recommendations work"}
-          </h2>
-        </div>
-        <p className="text-[11px] leading-5 text-[#706d7d]">
-          {zh
-            ? "结合学生经历、官方申请指导与 College Scorecard 数据。精确专业请前往大学官网核实。"
-            : "Combines student experiences, official application guidance, and College Scorecard data. Verify exact programs on university websites."}
-        </p>
-      </section>
     </aside>
   )
 }

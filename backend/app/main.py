@@ -10,8 +10,18 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
 from src.recommend import is_student_profile_indexed, stream_recommendation
+from src.safety import SafetyAction, validate_input
 
 from .profile_service import get_profile, list_profiles
+from .profile_information import build_structured_profile
+from .profile_additions import (
+    delete_addition,
+    format_additions,
+    list_addition_records,
+    preview_addition,
+    save_addition,
+    update_addition,
+)
 from .rate_limit import enforce_rate_limit
 from .streaming import resilient_stream
 from .conversation_service import chat as continue_conversation
@@ -24,6 +34,11 @@ from .schemas import (
     ProfileResponse,
     ProfilesResponse,
     RecommendationRequest,
+    ProfileAddition,
+    ProfileAdditionPreviewRequest,
+    ProfileAdditionSaveRequest,
+    ProfileAdditionRecord,
+    StructuredStudentProfile,
 )
 
 
@@ -126,6 +141,7 @@ def recommend(payload: RecommendationRequest, request: Request):
             ),
             college_scenario=payload.college_scenario,
             history=[turn.model_dump() for turn in payload.history],
+            profile_additions_context=format_additions(payload.profile_id),
         )
 
     return StreamingResponse(
@@ -148,6 +164,88 @@ def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             choice_id=payload.choice_id,
         )
     )
+
+
+@app.post("/api/profile-additions/preview", response_model=ProfileAddition, tags=["profiles"])
+def profile_addition_preview(payload: ProfileAdditionPreviewRequest, request: Request):
+    enforce_rate_limit(request, "chat")
+    if get_profile(payload.profile_id) is None:
+        raise HTTPException(status_code=404, detail="Student profile not found.")
+    safety = validate_input(payload.answer, "chat")
+    if not safety.allowed or safety.action is SafetyAction.REDACT:
+        raise HTTPException(status_code=400, detail="This answer cannot be added to the profile.")
+    return preview_addition(payload.question, payload.answer)
+
+
+@app.post("/api/profile-additions", tags=["profiles"])
+def profile_addition_save(payload: ProfileAdditionSaveRequest, request: Request):
+    enforce_rate_limit(request, "chat")
+    if get_profile(payload.profile_id) is None:
+        raise HTTPException(status_code=404, detail="Student profile not found.")
+    combined = "\n".join(
+        [payload.addition.action, payload.addition.outcome, payload.addition.reflection]
+    )
+    safety = validate_input(combined, "student_kb")
+    if not safety.allowed or safety.action is SafetyAction.REDACT:
+        raise HTTPException(status_code=400, detail="This information cannot be saved.")
+    return save_addition(payload.profile_id, payload.addition)
+
+
+@app.get(
+    "/api/profile-additions/{profile_id}",
+    response_model=list[ProfileAdditionRecord],
+    tags=["profiles"],
+)
+def profile_addition_list(profile_id: str):
+    if get_profile(profile_id) is None:
+        raise HTTPException(status_code=404, detail="Student profile not found.")
+    return list_addition_records(profile_id)
+
+
+@app.get(
+    "/api/profiles/{profile_id}/information",
+    response_model=StructuredStudentProfile,
+    tags=["profiles"],
+)
+def structured_profile_information(profile_id: str):
+    profile = get_profile(profile_id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Student profile not found.")
+    return build_structured_profile(profile, list_addition_records(profile_id))
+
+
+@app.put(
+    "/api/profile-additions/{profile_id}/{addition_id}",
+    response_model=ProfileAdditionRecord,
+    tags=["profiles"],
+)
+def profile_addition_update(
+    profile_id: str,
+    addition_id: str,
+    addition: ProfileAddition,
+    request: Request,
+):
+    enforce_rate_limit(request, "chat")
+    if get_profile(profile_id) is None:
+        raise HTTPException(status_code=404, detail="Student profile not found.")
+    combined = "\n".join([addition.action, addition.outcome, addition.reflection])
+    safety = validate_input(combined, "student_kb")
+    if not safety.allowed or safety.action is SafetyAction.REDACT:
+        raise HTTPException(status_code=400, detail="This information cannot be saved.")
+    updated = update_addition(profile_id, addition_id, addition)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Profile addition not found.")
+    return updated
+
+
+@app.delete("/api/profile-additions/{profile_id}/{addition_id}", tags=["profiles"])
+def profile_addition_delete(profile_id: str, addition_id: str, request: Request):
+    enforce_rate_limit(request, "chat")
+    if get_profile(profile_id) is None:
+        raise HTTPException(status_code=404, detail="Student profile not found.")
+    if not delete_addition(profile_id, addition_id):
+        raise HTTPException(status_code=404, detail="Profile addition not found.")
+    return {"deleted": True}
 
 
 if FRONTEND_DIST.is_dir():

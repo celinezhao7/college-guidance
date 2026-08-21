@@ -4,15 +4,25 @@ import { BookOpenText, Compass, FilePenLine, Menu, Minus, Plus } from "lucide-re
 import { ChatComposer } from "@/components/ChatComposer"
 import { ChatMessage, type Message } from "@/components/ChatMessage"
 import { Sidebar } from "@/components/Sidebar"
+import { ProfileInformationManager } from "@/components/ProfileInformationManager"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   loadRecommendationOptions,
   continueCollegeConversation,
   streamRecommendation,
+  previewProfileAddition,
+  saveProfileAddition,
+  loadProfileAdditions,
+  loadStructuredProfile,
+  updateProfileAddition,
+  deleteProfileAddition,
   type Profile,
   type RecommendationMode,
   type CollegePreferences,
   type QuickReply,
+  type ProfileAddition,
+  type ProfileAdditionRecord,
+  type StructuredStudentProfile,
 } from "@/lib/api"
 import {
   annotateRecognizedPinyin,
@@ -65,6 +75,11 @@ type ArchivedConversation = {
   modeId: string
   conversation: ModeConversationState
 }
+type PendingProfileAddition = {
+  addition: ProfileAddition
+  answer: string
+  question: string
+} | null
 
 function emptyModeConversation(): ModeConversationState {
   return {
@@ -110,6 +125,13 @@ function App() {
   const [storageHydrated, setStorageHydrated] = useState(false)
   const [chatArchives, setChatArchives] = useState<ArchivedConversation[]>([])
   const [canStopGeneration, setCanStopGeneration] = useState(false)
+  const [pendingProfileAddition, setPendingProfileAddition] = useState<PendingProfileAddition>(null)
+  const [editingProfileAdditionQuestion, setEditingProfileAdditionQuestion] = useState<string | null>(null)
+  const [profileManagerOpen, setProfileManagerOpen] = useState(false)
+  const [profileAdditionRecords, setProfileAdditionRecords] = useState<ProfileAdditionRecord[]>([])
+  const [structuredProfile, setStructuredProfile] = useState<StructuredStudentProfile | null>(null)
+  const [profileManagerLoading, setProfileManagerLoading] = useState(false)
+  const [profileManagerError, setProfileManagerError] = useState("")
   const scrollViewportRef = useRef<HTMLDivElement>(null)
   const generationAbortRef = useRef<AbortController | null>(null)
   const modeConversationsRef = useRef<Record<string, ModeConversationState>>({})
@@ -205,8 +227,8 @@ function App() {
     return () => clearTimeout(timeout)
   }, [modeSwitchNotice])
 
-  async function handleSend() {
-    const trimmedInput = input.trim()
+  async function handleSend(inputOverride?: string) {
+    const trimmedInput = (inputOverride ?? input).trim()
     const isCollegeMode = modeId === "college_field"
     if (!trimmedInput || !profileId || !modeId || isStreaming || submissionLockRef.current) return
     setModeSwitchNotice("")
@@ -223,6 +245,41 @@ function App() {
     setPendingLanguageSwitch(null)
     setLanguageCheckBypass(null)
     const semanticInput = annotateRecognizedPinyin(trimmedInput)
+
+    const latestAssistant = [...messages].reverse().find((message) => message.role === "assistant")
+    const evidenceQuestion = editingProfileAdditionQuestion
+      ?? (latestAssistant && isPiqFollowUpMessage(latestAssistant.content) ? latestAssistant.content : null)
+    if (
+      modeId === "uc_piq"
+      && evidenceQuestion
+      && !isPiqSkipMessage(trimmedInput)
+    ) {
+      submissionLockRef.current = true
+      setIsStreaming(true)
+      setLoadingPhase("conversation")
+      setInput("")
+      try {
+        const addition = await previewProfileAddition({
+          profileId,
+          question: evidenceQuestion,
+          answer: trimmedInput,
+        })
+        setPendingProfileAddition({ addition, answer: trimmedInput, question: evidenceQuestion })
+        setEditingProfileAdditionQuestion(null)
+        setMessages((previous) => [
+          ...previous,
+          { role: "user", content: trimmedInput },
+          { role: "assistant", content: profileAdditionPreviewMarkdown(addition, language) },
+        ])
+      } catch (error) {
+        setInputError(error instanceof Error ? error.message : "Could not prepare profile information.")
+      } finally {
+        setIsStreaming(false)
+        setLoadingPhase(null)
+        submissionLockRef.current = false
+      }
+      return
+    }
 
     if (isCollegeMode && awaitingPreference === "count" && !isValidCollegeCount(trimmedInput)) {
       setInputError(
@@ -476,6 +533,64 @@ function App() {
           : collegeScenario === "explore"
             ? zh ? "正在根据你的经历推荐专业领域……" : "Recommending fields of study based on your experiences…"
             : zh ? "正在准备下一步……" : "Preparing the next step…"
+  const lastAssistantContent = messages.at(-1)?.role === "assistant"
+    ? messages.at(-1)?.content ?? ""
+    : ""
+  const showPiqEvidenceChoice = (
+    modeId === "uc_piq"
+    && !isStreaming
+    && isPiqEvidenceWarning(lastAssistantContent)
+  )
+  const canSkipPiqFollowUp = (
+    modeId === "uc_piq"
+    && !isStreaming
+    && isPiqFollowUpMessage(lastAssistantContent)
+  )
+  const canImprovePiqRecommendations = (
+    modeId === "uc_piq"
+    && !isStreaming
+    && isLimitedPiqRecommendation(lastAssistantContent)
+  )
+
+  async function handleSaveProfileAddition() {
+    if (!pendingProfileAddition || isStreaming) return
+    setIsStreaming(true)
+    setLoadingPhase("conversation")
+    try {
+      await saveProfileAddition(profileId, pendingProfileAddition.addition)
+      setMessages((previous) => [...previous, {
+        role: "assistant",
+        content: zh
+          ? "已保存到学生画像。现在将使用更新后的信息重新生成推荐。"
+          : "Saved to the student profile. I’ll regenerate using the updated information.",
+      }])
+      setPendingProfileAddition(null)
+      setIsStreaming(false)
+      setLoadingPhase(null)
+      await handleSend(zh ? "使用刚保存的信息重新生成推荐" : "Regenerate recommendations using the information I saved")
+    } catch (error) {
+      setInputError(error instanceof Error ? error.message : "Could not save profile information.")
+      setIsStreaming(false)
+      setLoadingPhase(null)
+    }
+  }
+
+  function handleEditProfileAddition() {
+    if (!pendingProfileAddition) return
+    setInput(pendingProfileAddition.answer)
+    setEditingProfileAdditionQuestion(pendingProfileAddition.question)
+    setPendingProfileAddition(null)
+  }
+
+  async function handleUseProfileAdditionForChatOnly() {
+    if (!pendingProfileAddition) return
+    setPendingProfileAddition(null)
+    await handleSend(
+      zh
+        ? "仅在当前聊天中使用我刚才的回答，并重新生成推荐"
+        : "Use my previous answer for this chat only and regenerate recommendations",
+    )
+  }
   const modeDescription = modeId
     ? {
         college_field: zh
@@ -625,6 +740,51 @@ function App() {
       resetConversationState()
     }
     setProfileId(nextProfileId)
+    setProfileManagerOpen(false)
+    setProfileAdditionRecords([])
+    setStructuredProfile(null)
+  }
+
+  async function handleOpenProfileManager() {
+    if (!profileId) return
+    setProfileManagerOpen(true)
+    setProfileManagerLoading(true)
+    setProfileManagerError("")
+    try {
+      const [records, profile] = await Promise.all([
+        loadProfileAdditions(profileId),
+        loadStructuredProfile(profileId),
+      ])
+      setProfileAdditionRecords(records)
+      setStructuredProfile(profile)
+    } catch (error) {
+      setProfileManagerError(error instanceof Error ? error.message : "Could not load profile information.")
+    } finally {
+      setProfileManagerLoading(false)
+    }
+  }
+
+  async function handleUpdateProfileRecord(id: string, addition: ProfileAddition) {
+    try {
+      const updated = await updateProfileAddition(profileId, id, addition)
+      setProfileAdditionRecords((previous) => previous.map((item) => item.id === id ? updated : item))
+      setStructuredProfile(await loadStructuredProfile(profileId))
+      setProfileManagerError("")
+    } catch (error) {
+      setProfileManagerError(error instanceof Error ? error.message : "Could not update profile information.")
+      throw error
+    }
+  }
+
+  async function handleDeleteProfileRecord(id: string) {
+    try {
+      await deleteProfileAddition(profileId, id)
+      setProfileAdditionRecords((previous) => previous.filter((item) => item.id !== id))
+      setStructuredProfile(await loadStructuredProfile(profileId))
+      setProfileManagerError("")
+    } catch (error) {
+      setProfileManagerError(error instanceof Error ? error.message : "Could not delete profile information.")
+    }
   }
 
   function handleModeChange(nextModeId: string) {
@@ -725,6 +885,7 @@ function App() {
         historyItems={historyItems}
         onHistoryOpen={handleHistoryOpen}
         onProfileChange={handleProfileChange}
+        onManageProfile={() => void handleOpenProfileManager()}
         onModeChange={handleModeChange}
         onLanguageChange={handleLanguageChange}
         onNewChat={handleNewChat}
@@ -733,6 +894,17 @@ function App() {
           setMobileSidebarOpen(false)
           setDesktopSidebarOpen(false)
         }}
+      />
+      <ProfileInformationManager
+        open={profileManagerOpen}
+        language={language}
+        records={profileAdditionRecords}
+        profile={structuredProfile}
+        loading={profileManagerLoading}
+        error={profileManagerError}
+        onClose={() => setProfileManagerOpen(false)}
+        onUpdate={handleUpdateProfileRecord}
+        onDelete={handleDeleteProfileRecord}
       />
 
       {mobileSidebarOpen && (
@@ -851,6 +1023,66 @@ function App() {
                   {messages.map((message, index) => (
                     <ChatMessage key={index} message={message} />
                   ))}
+                  {showPiqEvidenceChoice && (
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="quick-reply"
+                        onClick={() => void handleSend(zh ? "我想补充信息" : "I want to add missing information")}
+                      >
+                        {zh ? "补充信息" : "Add information"}
+                      </button>
+                      <button
+                        type="button"
+                        className="quick-reply"
+                        onClick={() => void handleSend(zh ? "继续使用当前信息，直接推荐" : "Continue anyway and recommend now")}
+                      >
+                        {zh ? "仍然继续" : "Continue anyway"}
+                      </button>
+                    </div>
+                  )}
+                  {canSkipPiqFollowUp && (
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="quick-reply"
+                        onClick={() => void handleSend(zh ? "跳过这题，换一个问题" : "Skip this question and ask a different question")}
+                      >
+                        {zh ? "跳过这题" : "Skip this question"}
+                      </button>
+                      <button
+                        type="button"
+                        className="quick-reply"
+                        onClick={() => void handleSend(zh ? "全部跳过，直接推荐" : "Skip all and recommend now")}
+                      >
+                        {zh ? "全部跳过并推荐" : "Skip all and recommend"}
+                      </button>
+                    </div>
+                  )}
+                  {canImprovePiqRecommendations && (
+                    <div className="flex">
+                      <button
+                        type="button"
+                        className="quick-reply"
+                        onClick={() => void handleSend(zh ? "我想补充信息来完善推荐" : "I want to improve the recommendations by adding information")}
+                      >
+                        {zh ? "补充信息并重新推荐" : "Improve recommendations"}
+                      </button>
+                    </div>
+                  )}
+                  {pendingProfileAddition && (
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" className="quick-reply" onClick={() => void handleSaveProfileAddition()}>
+                        {zh ? "保存到学生画像" : "Save to profile"}
+                      </button>
+                      <button type="button" className="quick-reply" onClick={handleEditProfileAddition}>
+                        {zh ? "编辑后保存" : "Edit before saving"}
+                      </button>
+                      <button type="button" className="quick-reply" onClick={() => void handleUseProfileAdditionForChatOnly()}>
+                        {zh ? "仅用于当前聊天" : "Use for this chat only"}
+                      </button>
+                    </div>
+                  )}
                   {isStreaming && !messages.at(-1)?.content && (
                     <LoadingStatus label={streamingStatus} />
                   )}
@@ -978,6 +1210,34 @@ function LanguageSwitchPrompt({
 
 function isRecommendationCancelled(error: unknown) {
   return error instanceof Error && error.message === "RECOMMENDATION_CANCELLED"
+}
+
+function isPiqFollowUpMessage(content: string) {
+  return /Information Needed\s*(?:[—-]\s*Question\s*\d+|\(\s*Round\s*\d+\s*\/\s*\d+\s*\))|需要补充的信息\s*(?:[—-]\s*第?\s*\d+\s*个?问题|[（(]\s*第?\s*\d+\s*\/\s*\d+\s*轮?\s*[）)])/i.test(content)
+}
+
+function isPiqEvidenceWarning(content: string) {
+  return /More Information Recommended|建议补充更多信息/i.test(content)
+}
+
+function isLimitedPiqRecommendation(content: string) {
+  return /Match Score\s*[:：].*?\/\s*10/is.test(content)
+    && /Evidence Gaps\s*[:：]|证据缺口\s*[:：]/i.test(content)
+    && !/No major evidence gap|暂无重大证据缺口/i.test(content)
+}
+
+function isPiqSkipMessage(content: string) {
+  return /skip|pass|continue anyway|recommend now|跳过|直接推荐|不知道/i.test(content)
+}
+
+function profileAdditionPreviewMarkdown(addition: ProfileAddition, language: "en" | "zh") {
+  const label = addition.experience_number
+    ? `Experience ${addition.experience_number}: ${addition.experience_title ?? ""}`.trim()
+    : language === "zh" ? "新增经历信息" : "New experience information"
+  const value = (text: string) => text || (language === "zh" ? "未提供" : "Not provided")
+  return language === "zh"
+    ? `### 保存到学生画像前请确认\n\n**经历：** ${label}\n\n- **学生行动：** ${value(addition.action)}\n- **结果或影响：** ${value(addition.outcome)}\n- **反思或成长：** ${value(addition.reflection)}\n\n请选择保存、编辑，或仅用于当前聊天。`
+    : `### Confirm before saving to the student profile\n\n**Experience:** ${label}\n\n- **Student action:** ${value(addition.action)}\n- **Outcome or impact:** ${value(addition.outcome)}\n- **Reflection or growth:** ${value(addition.reflection)}\n\nChoose whether to save, edit, or use this information only for the current chat.`
 }
 
 function stoppedGenerationMessage(language: "en" | "zh") {
